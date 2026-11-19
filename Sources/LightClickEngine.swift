@@ -1,7 +1,13 @@
 @preconcurrency import AppKit
 @preconcurrency import ApplicationServices
+import LightClickCore
 import OpenMultitouchSupport
 
+/// Platform shell around `ClickEngine` (LightClickCore): owns the
+/// OpenMultitouchSupport touch stream, the CGEvent tap, CGEvent
+/// posting and the haptic actuator, and feeds everything to the
+/// decision engine. All click behaviour lives in the core; this
+/// class only translates between the core and macOS.
 @MainActor
 final class LightClickEngine {
     static let shared = LightClickEngine()
@@ -9,7 +15,11 @@ final class LightClickEngine {
     static let injectedMarker: Int64 = 0x534C_5450 // "SLTP"
 
     var threshold: Float {
-        didSet { UserDefaults.standard.set(threshold, forKey: "pressureThreshold") }
+        didSet {
+            UserDefaults.standard.set(threshold, forKey: "pressureThreshold")
+            core.threshold = Double(threshold)
+            recorder?.record(.thresholdChanged(time: CACurrentMediaTime(), value: Double(threshold)))
+        }
     }
 
     var onPressureChange: ((Float) -> Void)?
@@ -18,49 +28,53 @@ final class LightClickEngine {
         listeningTask != nil && eventTap != nil
     }
 
+    /// The decision engine. Exposed within the app target so the
+    /// debug menu can inspect recording state; behaviour changes go
+    /// through the core's own API.
+    let core: ClickEngine
+
+    /// Where the frame recording is being written (debug builds
+    /// only; nil in release builds).
+    private(set) var recordingURL: URL?
+
+    private let systemOutput: SystemClickOutput
+    private let recorder: FrameRecorder?
     private let manager = OMSManager.shared
     private var listeningTask: Task<Void, Never>?
     private var eventTap: CFMachPort?
     private var eventTapSource: CFRunLoopSource?
 
-    private var fingerID: Int32?
-    private var buttonDown = false
-    // CLICK COUNT (fork fix): see clickState(for:at:) below.
-    private var clickCount = 0
-    private var lastClickTime: CFTimeInterval = 0
-    private var lastClickLocation = CGPoint.zero
-    private var waitForAllFingersToLift = false
-    private var ignoreNativeMouseUpUntil: CFTimeInterval = 0
-    // FAST-JAB FIX: last time a touch frame showed a finger on the glass.
-    // The event tap uses it to tell a native press that came from the
-    // trackpad (a touch is, or just was, active) from one that came from
-    // an external mouse or another input source (no touch anywhere near).
-    private var lastTouchActivityTime: CFTimeInterval = 0
-    // When the event tap itself fired the currently held click (the
-    // fast-jab path), the moment it did so; 0 while any held click came
-    // from the pressure path. Lets the frame logic tell "this presser
-    // owns the held click" apart from "a second finger is chording
-    // against a click another finger is holding".
-    private var tapFiredDownAt: CFTimeInterval = 0
-    // SCROLL/GESTURE GATE (fork fix): state for telling a two-finger
-    // scroll/gesture apart from a press with a resting finger. Anchors
-    // remember where each touch was when the current multi-touch
-    // sequence began; if any finger travels from its anchor, the
-    // sequence is a scroll/gesture (gestureMoved) and clicks are
-    // suppressed until every finger lifts. The dwell counter requires
-    // a multi-touch press to hold the threshold for a few frames, so
-    // the pressure spike of fingers landing to scroll never fires.
-    private var activeTouchCount = 0
-    private var touchAnchors: [Int32: OMSPosition] = [:]
-    private var touchLastPositions: [Int32: OMSPosition] = [:]
-    private var gestureMoved = false
-    private var dwellFingerID: Int32?
-    private var dwellFrames = 0
-    private var hardDwellFingerID: Int32?
-    private var hardDwellFrames = 0
-
     private init() {
         threshold = UserDefaults.standard.float(forKey: "pressureThreshold")
+
+        #if FRAME_RECORDING
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let logsDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Logs/SilentLightTrackpad", isDirectory: true)
+            let url = logsDir.appendingPathComponent("frames-\(stamp).jsonl")
+            recorder = FrameRecorder(url: url)
+            recordingURL = recorder != nil ? url : nil
+        #else
+            recorder = nil
+            recordingURL = nil
+        #endif
+
+        let recorderBox = recorder
+        systemOutput = SystemClickOutput(record: { recorderBox?.record($0) })
+        core = ClickEngine(
+            now: { CACurrentMediaTime() },
+            cursorLocation: {
+                let point = CGEvent(source: nil)?.location ?? NSEvent.mouseLocation
+                return ClickPoint(x: Double(point.x), y: Double(point.y))
+            },
+            doubleClickInterval: { NSEvent.doubleClickInterval },
+            output: systemOutput
+        )
+        core.threshold = Double(threshold)
+        core.onPressureChange = { [weak self] pressure in
+            self?.onPressureChange?(Float(pressure))
+        }
     }
 
     func start() -> Bool {
@@ -70,7 +84,9 @@ final class LightClickEngine {
         listeningTask = Task { [weak self, manager] in
             for await touches in manager.touchDataStream {
                 guard let self else { return }
-                self.process(touches)
+                let samples = touches.compactMap(Self.sample(from:))
+                recorder?.record(.frame(time: CACurrentMediaTime(), touches: samples))
+                core.processFrame(samples)
             }
             guard !Task.isCancelled else { return }
             self?.stop()
@@ -80,12 +96,13 @@ final class LightClickEngine {
             stop()
             return false
         }
+        recorder?.record(.sessionStarted(time: CACurrentMediaTime(), threshold: Double(threshold)))
         onStateChange?(true)
         return true
     }
 
     func stop() {
-        releaseButtonIfNeeded()
+        core.reset()
         listeningTask?.cancel()
         listeningTask = nil
         _ = manager.stopListening()
@@ -93,17 +110,26 @@ final class LightClickEngine {
         if let eventTap { CFMachPortInvalidate(eventTap) }
         eventTapSource = nil
         eventTap = nil
-        resetSequence()
-        waitForAllFingersToLift = false
-        touchAnchors = [:]
-        touchLastPositions = [:]
-        gestureMoved = false
-        dwellFingerID = nil
-        dwellFrames = 0
-        hardDwellFingerID = nil
-        hardDwellFrames = 0
-        activeTouchCount = 0
         onStateChange?(false)
+    }
+
+    /// Map one raw touch to the core's sample type; touches that are
+    /// not in an active state (leaving, etc.) drop out, exactly as
+    /// the core's frame contract expects.
+    private static func sample(from touch: OMSTouchData) -> TouchSample? {
+        switch touch.state {
+        case .starting, .making, .touching, .breaking:
+            break
+        default:
+            return nil
+        }
+        return TouchSample(
+            id: touch.id,
+            x: Double(touch.position.x),
+            y: Double(touch.position.y),
+            pressure: Double(touch.pressure),
+            majorAxis: Double(touch.axis.major)
+        )
     }
 
     private func installEventTap() -> Bool {
@@ -141,355 +167,80 @@ final class LightClickEngine {
             return Unmanaged.passUnretained(event)
         }
 
-        if buttonDown, type == .mouseMoved {
+        if type == .mouseMoved || type == .leftMouseDragged {
+            let location = event.location
+            recorder?.record(.nativeMove(time: CACurrentMediaTime(), x: Double(location.x), y: Double(location.y)))
+        }
+
+        if core.shouldConvertMoveToDrag, type == .mouseMoved {
             event.type = .leftMouseDragged
             return Unmanaged.passUnretained(event)
         }
 
         if type == .leftMouseDown {
-            if buttonDown {
-                // Our click is already down — the usual order, since the
-                // light pressure click fires before the finger reaches
-                // Apple's heavier native threshold. Swallow the native
-                // press so one press stays one click.
-                return nil
-            }
-            if CACurrentMediaTime() - lastTouchActivityTime <= 0.15 {
-                // FAST-JAB FIX (fork fix): a fast, hard jab can cross
-                // Apple's native threshold before the next pressure frame
-                // is processed, so the native click wins the race against
-                // the touch stream and slips through as a real click —
-                // followed a frame later by ours: one jab, two clicks.
-                // A native press while a trackpad touch is active IS
-                // that press: swallow it and answer with our own click
-                // right now — the same event the pressure path posts,
-                // haptic and click count included. (Unless the engine is
-                // locked for a multi-finger press; then just swallow.)
-                // No recent touch means an external mouse or another
-                // input source — not ours; fall through and pass it.
-                // And never answer during a classified scroll/gesture:
-                // a native press surfacing mid-scroll is swallowed,
-                // not converted into our click.
-                if !waitForAllFingersToLift, !gestureMoved {
-                    fireButtonDown(fromTap: true)
-                }
+            recorder?.record(.nativeDown(time: CACurrentMediaTime()))
+            if core.handleNativeMouseDown() {
                 return nil
             }
         }
 
-        if type == .leftMouseUp,
-           buttonDown || CACurrentMediaTime() < ignoreNativeMouseUpUntil {
-            return nil
+        if type == .leftMouseUp {
+            recorder?.record(.nativeUp(time: CACurrentMediaTime()))
+            if core.handleNativeMouseUp() {
+                return nil
+            }
         }
 
         return Unmanaged.passUnretained(event)
     }
+}
 
-    private func process(_ touches: [OMSTouchData]) {
-        let active = touches.filter {
-            switch $0.state {
-            case .starting, .making, .touching, .breaking: true
-            default: false
-            }
-        }
+/// The core's hands and voice on a real Mac: posts the synthetic
+/// CGEvents (with the injected marker, the click state the core
+/// computed, and the live modifier flags) and fires the synthetic
+/// haptic. In the debug build it also records every output into the
+/// frame recording.
+@MainActor
+private final class SystemClickOutput: ClickOutput {
+    private let record: (RecordedEvent) -> Void
 
-        // PALM REJECTION (fork fix, matching native): macOS filters
-        // contacts by size before anything else — a palm or the heel
-        // of a hand is not a finger: it must not press, count as a
-        // resting finger, or feed the gesture gate. The contact
-        // ellipse's major axis is in millimetres; a firm fingertip
-        // measures ~10 mm, so 20 mm is twice a finger and still below
-        // a palm. The currently tracked finger is exempt — a pressing
-        // finger flattens and its ellipse grows, and an in-flight
-        // click must never be reclassified away mid-press.
-        let fingers = active.filter { $0.id == fingerID || $0.axis.major < 20 }
-
-        activeTouchCount = fingers.count
-        updateGestureGate(fingers)
-
-        if !fingers.isEmpty {
-            lastTouchActivityTime = CACurrentMediaTime()
-        }
-
-        if fingers.isEmpty {
-            finishSequence()
-            waitForAllFingersToLift = false
-            return
-        }
-
-        guard !waitForAllFingersToLift else { return }
-
-        // RESTING-FINGER SUPPORT (fork fix, from the native-behaviour
-        // audit): upstream demanded exactly ONE active touch — with a
-        // thumb or second finger merely resting on the glass, pressing
-        // with another finger produced no click at all and locked input
-        // until every finger lifted. Native trackpads click fine in
-        // that posture. So: follow ONE tracked finger (the presser) and
-        // ignore the rest, with two safeguards —
-        //  * two fingers pressing together is a two-finger click
-        //    (native secondary click): never answer it with a left
-        //    click; lock until all fingers lift, as upstream did;
-        //  * a second finger pressing while our click is already down
-        //    is the same chord: release ours and lock — unless the held
-        //    click is the tap-fired one and belongs to that finger.
-        // A second finger that only rests (low pressure) never disturbs
-        // an ongoing click or drag.
-        if let fingerID, let tracked = fingers.first(where: { $0.id == fingerID }) {
-            if let presser = fingers.first(where: { $0.id != fingerID && max(0, $0.pressure) >= threshold }) {
-                if buttonDown, CACurrentMediaTime() - tapFiredDownAt > 0.1 {
-                    // A second finger pressing while a pressure-path
-                    // click is held: a chord — release ours and lock.
-                    releaseButtonIfNeeded()
-                    resetSequence()
-                    waitForAllFingersToLift = true
-                } else {
-                    // No click down: the watched finger turned out to be
-                    // the resting one — hand tracking to the presser.
-                    // Or the held click is the tap-fired one (fast jab)
-                    // and belongs to this very presser, the watched
-                    // finger being a resting one: the presser owns the
-                    // click — hand tracking over and keep it down, so a
-                    // jab with a thumb resting can still hold and drag.
-                    self.fingerID = presser.id
-                    handlePress(presser)
-                }
-                return
-            }
-            handlePress(tracked)
-            return
-        }
-
-        if fingerID != nil {
-            // The tracked finger lifted while other (resting) touches
-            // remain. End its sequence WITHOUT locking — a remaining
-            // finger may still press on its own.
-            releaseButtonIfNeeded()
-            resetSequence()
-        }
-
-        // Nobody is tracked: two or more fingers already pressing
-        // together means a two-finger click — lock, don't left-click.
-        let pressing = fingers.filter { max(0, $0.pressure) >= threshold * 0.5 }
-        if pressing.count > 1 {
-            // Release first: a tap-fired click (fast jab landing as
-            // another finger also presses) can be held at this point,
-            // and the lock makes process() ignore frames until every
-            // finger lifts — never lock with the button down, or the
-            // click would stay held for the whole lock.
-            releaseButtonIfNeeded()
-            waitForAllFingersToLift = true
-            return
-        }
-
-        // Watch the strongest touch; resting fingers sit at low
-        // pressure, so the one that presses stands out.
-        guard let candidate = fingers.max(by: { max(0, $0.pressure) < max(0, $1.pressure) }) else { return }
-        fingerID = candidate.id
-        handlePress(candidate)
+    init(record: @escaping (RecordedEvent) -> Void) {
+        self.record = record
     }
 
-    /// SCROLL/GESTURE GATE bookkeeping, run on every frame before any
-    /// click logic: anchor each touch when it joins a multi-touch
-    /// sequence, and classify the sequence as a scroll/gesture once
-    /// any finger has travelled ~2 mm from its anchor (0.02 in the
-    /// trackpad's normalised coordinates) or moved ~1.2 mm in a
-    /// single frame — a flick's speed gives it away before its
-    /// travel does. The classification sticks until every finger
-    /// lifts — a finger that keeps gliding after the other one
-    /// leaves is still scrolling, not pressing.
-    private func updateGestureGate(_ active: [OMSTouchData]) {
-        if active.isEmpty {
-            touchAnchors = [:]
-            touchLastPositions = [:]
-            gestureMoved = false
-            dwellFingerID = nil
-            dwellFrames = 0
-            hardDwellFingerID = nil
-            hardDwellFrames = 0
-            return
-        }
-        guard active.count >= 2 else { return }
-        let ids = Set(active.map(\.id))
-        touchAnchors = touchAnchors.filter { ids.contains($0.key) }
-        touchLastPositions = touchLastPositions.filter { ids.contains($0.key) }
-        for touch in active {
-            // VELOCITY TRIGGER: per-frame displacement of any finger.
-            if let last = touchLastPositions[touch.id] {
-                let vx = touch.position.x - last.x
-                let vy = touch.position.y - last.y
-                if vx * vx + vy * vy > 0.000144 {
-                    gestureMoved = true
-                }
-            }
-            touchLastPositions[touch.id] = touch.position
-
-            if let anchor = touchAnchors[touch.id] {
-                let dx = touch.position.x - anchor.x
-                let dy = touch.position.y - anchor.y
-                if dx * dx + dy * dy > 0.0004 {
-                    gestureMoved = true
-                }
-            } else {
-                touchAnchors[touch.id] = touch.position
-            }
-        }
+    func postMouseDown(at point: ClickPoint, clickState: Int) {
+        post(type: .leftMouseDown, at: point, clickState: clickState)
+        record(.outputDown(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
     }
 
-    /// Whether a press by the currently handled finger may fire now.
-    /// During a classified scroll/gesture: only a sustained hard
-    /// press (below). With two or more fingers down and no gesture:
-    /// only once the press has held the threshold for 3 frames — a
-    /// deliberate press with a resting finger holds; the landing
-    /// spike of a scroll crosses and falls back within a frame or
-    /// two. Single-finger presses are unaffected and still fire on
-    /// the first frame, exactly as before.
-    private func clickGateAllowsPress() -> Bool {
-        if gestureMoved {
-            // HARD-PRESS OVERRIDE (fork fix, matching native): the
-            // native button channel is never vetoed by the gesture
-            // layer — press hard enough mid-scroll and a real Mac
-            // clicks. Mirror it: a finger holding twice the click
-            // threshold for 2 frames is a deliberate press, not
-            // scroll load. Ordinary scrolling sustains nothing near
-            // that, so accidental scroll clicks stay dead.
-            return hardDwellFrames >= 2
-        }
-        if activeTouchCount >= 2, dwellFrames < 3 { return false }
-        return true
+    func postMouseUp(at point: ClickPoint, clickState: Int) {
+        post(type: .leftMouseUp, at: point, clickState: clickState)
+        record(.outputUp(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
     }
 
-    private func handlePress(_ touch: OMSTouchData) {
-        let pressure = max(0, touch.pressure)
-        onPressureChange?(pressure)
-
-        // SCROLL/GESTURE GATE: track how long this finger has been
-        // pressing at/above the threshold (see clickGateAllowsPress).
-        if pressure >= threshold {
-            if dwellFingerID == touch.id {
-                dwellFrames += 1
-            } else {
-                dwellFingerID = touch.id
-                dwellFrames = 1
-            }
-        } else if dwellFingerID == touch.id {
-            dwellFrames = 0
-        }
-
-        // HARD-PRESS OVERRIDE bookkeeping: how long this finger has
-        // been pressing at/above twice the threshold (see
-        // clickGateAllowsPress).
-        if pressure >= threshold * 2 {
-            if hardDwellFingerID == touch.id {
-                hardDwellFrames += 1
-            } else {
-                hardDwellFingerID = touch.id
-                hardDwellFrames = 1
-            }
-        } else if hardDwellFingerID == touch.id {
-            hardDwellFrames = 0
-        }
-
-        if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
-            fireButtonDown()
-        }
-
-        // SNAPPY RELEASE (fork fix, from Ash's on-device feedback): upstream
-        // only released the button in finishSequence() — when every finger
-        // had fully left the glass — so easing off the pressure changed
-        // nothing: the click stayed held until the finger was lifted off
-        // the trackpad entirely, and felt long and stretched. A real click
-        // ends when the press ends. Release as soon as pressure falls back
-        // below 70% of the press threshold; the 30% hysteresis band keeps
-        // pressure jitter near the threshold from flickering the button.
-        // Keeping pressure up still holds the button, so click-hold and
-        // click-drag keep working, and pressing again re-clicks (which is
-        // also what makes double-clicks possible).
-        if buttonDown, pressure <= threshold * 0.7 {
-            releaseButtonIfNeeded()
-        }
+    func pulseHaptic(down: Bool) {
+        HapticsController.shared.actuateClick(down: down)
+        record(.outputHaptic(time: CACurrentMediaTime(), down: down))
     }
 
-    private func finishSequence() {
-        // Release unconditionally (releaseButtonIfNeeded self-guards):
-        // a tap-fired click can be held while no finger is tracked, and
-        // a held click must never outlive its touch session.
-        releaseButtonIfNeeded()
-        if fingerID != nil { resetSequence() }
-    }
-
-    /// Post our synthetic mouse-down and mark the button held. Shared by
-    /// the pressure path (handlePress) and the event tap's fast-jab path
-    /// (filter), so both produce the identical click: marker, click
-    /// count, modifier flags and the synthetic haptic. The tap path
-    /// passes fromTap so the frame logic can attribute the held click
-    /// to the finger whose native press the tap just answered.
-    private func fireButtonDown(fromTap: Bool = false) {
-        postMouseEvent(type: .leftMouseDown)
-        buttonDown = true
-        tapFiredDownAt = fromTap ? CACurrentMediaTime() : 0
-        // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
-        HapticsController.shared.actuateClick(down: true)
-    }
-
-    private func releaseButtonIfNeeded() {
-        guard buttonDown else { return }
-        postMouseEvent(type: .leftMouseUp)
-        // HAPTIC FORK ADDITION: release-phase haptic, mirroring a real click's up-stroke.
-        HapticsController.shared.actuateClick(down: false)
-        buttonDown = false
-        tapFiredDownAt = 0
-        ignoreNativeMouseUpUntil = CACurrentMediaTime() + 0.15
-    }
-
-    private func resetSequence() {
-        fingerID = nil
-        onPressureChange?(0)
-    }
-
-    private func postMouseEvent(type: CGEventType) {
-        let location = CGEvent(source: nil)?.location ?? NSEvent.mouseLocation
+    private func post(type: CGEventType, at point: ClickPoint, clickState: Int) {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             mouseEventSource: source,
             mouseType: type,
-            mouseCursorPosition: location,
+            mouseCursorPosition: CGPoint(x: point.x, y: point.y),
             mouseButton: .left
         ) else { return }
-        event.setIntegerValueField(.eventSourceUserData, value: Self.injectedMarker)
-        event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState(for: type, at: location)))
-        // MODIFIER KEYS (fork fix, from the native-behaviour audit): a real
-        // click carries the modifiers held at that moment — Cmd+click opens
-        // a link in a new tab, Ctrl+click acts as a secondary click,
-        // Shift+click extends a selection. The engine never set flags on
-        // its synthetic events, leaving that to undocumented event-source
-        // inheritance. Copy the live HID modifier state explicitly so
-        // modified clicks behave exactly like native ones.
+        event.setIntegerValueField(.eventSourceUserData, value: LightClickEngine.injectedMarker)
+        event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
+        // MODIFIER KEYS (fork fix, from the native-behaviour audit): a
+        // real click carries the modifiers held at that moment —
+        // Cmd+click opens a link in a new tab, Ctrl+click acts as a
+        // secondary click, Shift+click extends a selection. Copy the
+        // live HID modifier state explicitly so modified clicks
+        // behave exactly like native ones.
         event.flags = CGEventSource.flagsState(.hidSystemState)
         event.post(tap: .cghidEventTap)
-    }
-
-    /// CLICK COUNT (fork fix, from Ash's on-device report): selecting a
-    /// word on double-click / a line on triple-click is driven by the
-    /// event's click state. macOS computes that itself for real presses
-    /// and taps, but NOT for software-posted events — and upstream never
-    /// set it, so every synthetic click arrived as click #1 and a fast
-    /// double press looked like two unrelated single clicks. Mirror the
-    /// system: a press within the user's double-click interval and a few
-    /// pixels of the previous one bumps the count (2 = word, 3 = line);
-    /// anything else restarts at 1. The matching mouse-up carries the
-    /// same count.
-    private func clickState(for type: CGEventType, at location: CGPoint) -> Int {
-        if type == .leftMouseDown {
-            let now = CACurrentMediaTime()
-            let dx = location.x - lastClickLocation.x
-            let dy = location.y - lastClickLocation.y
-            let chained = now - lastClickTime <= NSEvent.doubleClickInterval
-                && dx * dx + dy * dy <= 25
-            clickCount = chained ? clickCount + 1 : 1
-            lastClickTime = now
-            lastClickLocation = location
-        }
-        return max(clickCount, 1)
     }
 }
 

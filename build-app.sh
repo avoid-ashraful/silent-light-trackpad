@@ -4,8 +4,16 @@ set -euo pipefail
 project_dir="${0:A:h}"
 cd "$project_dir"
 
-swift build -c release --arch arm64
-bin_dir="$(swift build -c release --arch arm64 --show-bin-path)"
+# FRAME_RECORDING=1 builds the debug variant: the frame recorder is
+# compiled in and every touch frame / native event / output is
+# logged to ~/Library/Logs/SilentLightTrackpad/ for replay in tests.
+swift_args=(--arch arm64)
+if [[ "${FRAME_RECORDING:-0}" == "1" ]]; then
+    swift_args+=(-Xswiftc -DFRAME_RECORDING)
+fi
+
+swift build -c release "${swift_args[@]}"
+bin_dir="$(swift build -c release "${swift_args[@]}" --show-bin-path)"
 app_dir="$project_dir/dist/Silent Light Trackpad.app"
 
 if [[ "$app_dir" != "$project_dir/dist/Silent Light Trackpad.app" ]]; then

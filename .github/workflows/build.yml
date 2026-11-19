@@ -20,6 +20,8 @@ jobs:
           sw_vers
           xcodebuild -version || true
           swift --version
+      - name: Run core tests
+        run: swift test
       - name: Build app
         run: ./build-app.sh
       - name: Verify app architecture

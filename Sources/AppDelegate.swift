@@ -131,6 +131,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.target = self
         menu.addItem(loginItem)
 
+        #if FRAME_RECORDING
+            // DEBUG BUILD ONLY: the frame recorder is compiled in and
+            // always on, writing every frame/event/output to
+            // ~/Library/Logs/SilentLightTrackpad/ as JSON Lines for
+            // replay through the test suite.
+            menu.addItem(.separator())
+            let recordingItem = NSMenuItem(title: localized("Frame recording: ON (debug build)", "帧录制：开（调试版）"), action: nil, keyEquivalent: "")
+            recordingItem.isEnabled = false
+            menu.addItem(recordingItem)
+            let openRecordings = NSMenuItem(title: localized("Open Recordings Folder", "打开录制文件夹"), action: #selector(openRecordingsFolder), keyEquivalent: "")
+            openRecordings.target = self
+            menu.addItem(openRecordings)
+        #endif
+
         menu.addItem(.separator())
         let permission = NSMenuItem(title: localized("Open Accessibility Settings…", "打开辅助功能设置…"), action: #selector(openAccessibility), keyEquivalent: "")
         permission.target = self
@@ -431,6 +445,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         refreshLoginItem()
     }
+
+    #if FRAME_RECORDING
+        @objc private func openRecordingsFolder() {
+            if let url = engine.recordingURL {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+    #endif
 
     @objc private func openAccessibility() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
