@@ -71,6 +71,20 @@ light click is completely silent / feel-less.
      down to scroll. Single-finger presses are unchanged and still
      fire instantly; the same gate also covers most three-finger
      gesture cases.
+   - Native-parity round (after researching how macOS itself does
+     it — the native click is one fused strain-gauge force computed
+     in firmware, a signal MultitouchSupport never exposes, so the
+     fork matches the decision logic instead): palm rejection —
+     contacts whose ellipse major axis is ≥ 20 mm (a firm fingertip
+     measures ~10 mm) are not fingers and are filtered out before
+     all click/gate logic, with the tracked finger exempt so a
+     flattening press is never reclassified mid-click; a hard-press
+     override — during a classified scroll, a finger sustaining
+     twice the threshold for 2 frames still clicks, mirroring the
+     native button channel that gestures never veto; and a velocity
+     trigger — a finger moving ~1.2 mm in a single frame classifies
+     the sequence as a gesture immediately, without waiting for
+     the ~2 mm anchor travel to accumulate.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
