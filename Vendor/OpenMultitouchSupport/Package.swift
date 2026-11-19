@@ -18,7 +18,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-async-algorithms.git", from: "1.1.4"),
+        .package(url: "https://github.com/apple/swift-async-algorithms.git", exact: "1.1.5"),
     ],
     targets: [
         .binaryTarget(
