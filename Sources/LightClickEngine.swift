@@ -42,6 +42,19 @@ final class LightClickEngine {
     // owns the held click" apart from "a second finger is chording
     // against a click another finger is holding".
     private var tapFiredDownAt: CFTimeInterval = 0
+    // SCROLL/GESTURE GATE (fork fix): state for telling a two-finger
+    // scroll/gesture apart from a press with a resting finger. Anchors
+    // remember where each touch was when the current multi-touch
+    // sequence began; if any finger travels from its anchor, the
+    // sequence is a scroll/gesture (gestureMoved) and clicks are
+    // suppressed until every finger lifts. The dwell counter requires
+    // a multi-touch press to hold the threshold for a few frames, so
+    // the pressure spike of fingers landing to scroll never fires.
+    private var activeTouchCount = 0
+    private var touchAnchors: [Int32: OMSPosition] = [:]
+    private var gestureMoved = false
+    private var dwellFingerID: Int32?
+    private var dwellFrames = 0
 
     private init() {
         threshold = UserDefaults.standard.float(forKey: "pressureThreshold")
@@ -79,6 +92,11 @@ final class LightClickEngine {
         eventTap = nil
         resetSequence()
         waitForAllFingersToLift = false
+        touchAnchors = [:]
+        gestureMoved = false
+        dwellFingerID = nil
+        dwellFrames = 0
+        activeTouchCount = 0
         onStateChange?(false)
     }
 
@@ -143,7 +161,10 @@ final class LightClickEngine {
                 // locked for a multi-finger press; then just swallow.)
                 // No recent touch means an external mouse or another
                 // input source — not ours; fall through and pass it.
-                if !waitForAllFingersToLift {
+                // And never answer during a classified scroll/gesture:
+                // a native press surfacing mid-scroll is swallowed,
+                // not converted into our click.
+                if !waitForAllFingersToLift, !gestureMoved {
                     fireButtonDown(fromTap: true)
                 }
                 return nil
@@ -165,6 +186,9 @@ final class LightClickEngine {
             default: false
             }
         }
+
+        activeTouchCount = active.count
+        updateGestureGate(active)
 
         if !active.isEmpty {
             lastTouchActivityTime = CACurrentMediaTime()
@@ -247,11 +271,68 @@ final class LightClickEngine {
         handlePress(candidate)
     }
 
+    /// SCROLL/GESTURE GATE bookkeeping, run on every frame before any
+    /// click logic: anchor each touch when it joins a multi-touch
+    /// sequence, and classify the sequence as a scroll/gesture once
+    /// any finger has travelled ~2 mm from its anchor (0.02 in the
+    /// trackpad's normalised coordinates). The classification sticks
+    /// until every finger lifts — a finger that keeps gliding after
+    /// the other one leaves is still scrolling, not pressing.
+    private func updateGestureGate(_ active: [OMSTouchData]) {
+        if active.isEmpty {
+            touchAnchors = [:]
+            gestureMoved = false
+            dwellFingerID = nil
+            dwellFrames = 0
+            return
+        }
+        guard active.count >= 2 else { return }
+        let ids = Set(active.map(\.id))
+        touchAnchors = touchAnchors.filter { ids.contains($0.key) }
+        for touch in active {
+            if let anchor = touchAnchors[touch.id] {
+                let dx = touch.position.x - anchor.x
+                let dy = touch.position.y - anchor.y
+                if dx * dx + dy * dy > 0.0004 {
+                    gestureMoved = true
+                }
+            } else {
+                touchAnchors[touch.id] = touch.position
+            }
+        }
+    }
+
+    /// Whether a press by the currently handled finger may fire now.
+    /// During a classified scroll/gesture: never. With two or more
+    /// fingers down: only once the press has held the threshold for
+    /// 3 frames — a deliberate press with a resting finger holds; the
+    /// landing spike of a scroll crosses and falls back within a
+    /// frame or two. Single-finger presses are unaffected and still
+    /// fire on the first frame, exactly as before.
+    private func clickGateAllowsPress() -> Bool {
+        if gestureMoved { return false }
+        if activeTouchCount >= 2, dwellFrames < 3 { return false }
+        return true
+    }
+
     private func handlePress(_ touch: OMSTouchData) {
         let pressure = max(0, touch.pressure)
         onPressureChange?(pressure)
 
-        if !buttonDown, pressure >= threshold {
+        // SCROLL/GESTURE GATE: track how long this finger has been
+        // pressing at/above the threshold (see clickGateAllowsPress).
+        if pressure >= threshold {
+            if dwellFingerID == touch.id {
+                dwellFrames += 1
+            } else {
+                dwellFingerID = touch.id
+                dwellFrames = 1
+            }
+        } else if dwellFingerID == touch.id {
+            dwellFrames = 0
+        }
+
+        if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
             fireButtonDown()
         }
 
