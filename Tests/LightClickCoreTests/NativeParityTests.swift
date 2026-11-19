@@ -73,13 +73,14 @@ final class NativeParityTests: EngineTestCase {
     // MARK: - Hard-press override during a classified scroll
 
     /// Classify a scroll with finger 1 tracked (32) and finger 2
-    /// resting (30), both gliding. Returns after 3 frames.
+    /// resting (20 — below the 25 two-finger arming line, so the
+    /// pair does not lock), both gliding. Returns after 3 frames.
     private func classifyScroll(_ rig: TestRig) {
         var y = 0.50
         for _ in 0 ..< 3 {
             rig.frame(
                 rig.touch(1, 32, x: 0.40, y: y),
-                rig.touch(2, 30, x: 0.60, y: y + 0.05)
+                rig.touch(2, 20, x: 0.60, y: y + 0.05)
             )
             y += 0.015
         }
@@ -130,7 +131,9 @@ final class NativeParityTests: EngineTestCase {
         let rig = makeRig(threshold: 30) // override needs a sustained 60 here
         var y = 0.50
         for _ in 0 ..< 3 {
-            rig.frame(rig.touch(1, 22, x: 0.40, y: y), rig.touch(2, 20, x: 0.60, y: y + 0.05))
+            // Finger 2 at 12 stays below the 15 arming line at this
+            // threshold, so the pair scrolls instead of locking.
+            rig.frame(rig.touch(1, 22, x: 0.40, y: y), rig.touch(2, 12, x: 0.60, y: y + 0.05))
             y += 0.015
         }
         XCTAssertTrue(rig.engine.gestureMoved)

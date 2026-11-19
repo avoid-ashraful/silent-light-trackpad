@@ -82,10 +82,11 @@ final class JabTests: EngineTestCase {
 
     func testNativeDownDuringScrollIsSwallowedButNotConverted() {
         let rig = makeRig()
-        // Classify a scroll (two fingers gliding).
-        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.50), rig.touch(2, 30, x: 0.60, y: 0.55))
-        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.515), rig.touch(2, 30, x: 0.60, y: 0.565))
-        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.53), rig.touch(2, 30, x: 0.60, y: 0.58))
+        // Classify a scroll (two fingers gliding; finger 2 below
+        // the arming line, so this is the gate, not the lock).
+        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.50), rig.touch(2, 20, x: 0.60, y: 0.55))
+        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.515), rig.touch(2, 20, x: 0.60, y: 0.565))
+        rig.frame(rig.touch(1, 30, x: 0.40, y: 0.53), rig.touch(2, 20, x: 0.60, y: 0.58))
         XCTAssertTrue(rig.engine.gestureMoved)
 
         XCTAssertTrue(rig.nativeDown()) // swallowed…
