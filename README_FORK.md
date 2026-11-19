@@ -45,6 +45,14 @@ light click is completely silent / feel-less.
      still refusing to answer a genuine two-finger press (both fingers
      pressing together, or a second press mid-click) with a left click —
      that stays the native secondary click.
+   - Fast-jab double-fire: a fast, hard press could cross Apple's
+     native threshold before the next pressure frame arrived, letting
+     the native click slip through the event tap, followed a frame
+     later by the app's own — one jab, two clicks. The fork's tap now
+     recognises a native press that belongs to the trackpad (a touch
+     is, or just was, active), swallows it, and answers with the app's
+     own click on the spot. Native presses with no touch behind them
+     (external mouse, other input sources) pass through untouched.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
