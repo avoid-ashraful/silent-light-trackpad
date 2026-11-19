@@ -154,6 +154,8 @@ final class LightClickEngine {
         if !buttonDown, pressure >= threshold {
             postMouseEvent(type: .leftMouseDown)
             buttonDown = true
+            // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
+            HapticsController.shared.actuateClick(down: true)
         }
     }
 
@@ -166,6 +168,8 @@ final class LightClickEngine {
     private func releaseButtonIfNeeded() {
         guard buttonDown else { return }
         postMouseEvent(type: .leftMouseUp)
+        // HAPTIC FORK ADDITION: release-phase haptic, mirroring a real click's up-stroke.
+        HapticsController.shared.actuateClick(down: false)
         buttonDown = false
         ignoreNativeMouseUpUntil = CACurrentMediaTime() + 0.15
     }

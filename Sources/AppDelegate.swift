@@ -81,8 +81,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enabledItem.target = self
         menu.addItem(enabledItem)
 
-        hapticsItem = NSMenuItem(title: localized("Haptics: checking", "触感：检查中"), action: nil, keyEquivalent: "")
-        hapticsItem.isEnabled = false
+        // HAPTIC FORK CHANGE: this was a disabled status label upstream
+        // ("Haptics: fully disabled", isEnabled = false, no action, so its
+        // state could never be changed). It is now a real, clickable toggle
+        // for the synthetic click haptic, with a persisted on/off state.
+        hapticsItem = NSMenuItem(title: localized("Click haptic feedback", "点击触感反馈"), action: #selector(toggleClickHaptic), keyEquivalent: "")
+        hapticsItem.target = self
         menu.addItem(hapticsItem)
 
         pressureItem = NSMenuItem(title: localized("Current pressure: 0 g", "当前压力：0 g"), action: nil, keyEquivalent: "")
@@ -339,10 +343,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             enabledItem?.state = .off
             enabledItem?.title = localized("Light-pressure click", "轻压点击")
         }
-        hapticsItem?.title = haptics.isEnabled == false
-            ? localized("Haptics: fully disabled", "触感：已彻底关闭")
-            : localized("Haptics: still enabled", "触感：未关闭")
-        hapticsItem?.state = haptics.isEnabled == false ? .on : .off
+        hapticsItem?.title = localized("Click haptic feedback", "点击触感反馈")
+        hapticsItem?.state = haptics.clickHapticEnabled ? .on : .off
+        hapticsItem?.isEnabled = true
         for item in thresholdItems { item.state = item.tag == Int(engine.threshold) ? .on : .off }
         refreshLoginItem()
     }
@@ -365,6 +368,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.removeObject(forKey: restorePendingKey)
             UserDefaults.standard.set(true, forKey: lightClickKey)
             applyConfiguration(showErrors: true)
+        }
+        refreshMenu()
+    }
+
+    /// HAPTIC FORK CHANGE: the haptics menu item can now actually be toggled.
+    /// ON = synthetic haptic fires at the light-click threshold (system
+    /// actuations stay off, so there is no late/heavy native click).
+    /// OFF = upstream behaviour, a fully silent light click.
+    @objc private func toggleClickHaptic() {
+        haptics.clickHapticEnabled.toggle()
+        if haptics.clickHapticEnabled {
+            // One sample press-phase pulse so the change can be felt at once.
+            haptics.actuateClick(down: true)
         }
         refreshMenu()
     }
