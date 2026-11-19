@@ -28,6 +28,12 @@ light click is completely silent / feel-less.
      the pressure. The fork releases as soon as pressure falls below 70%
      of the press threshold — the click ends when the press ends. Holding
      pressure still holds the button (click-hold / drag unaffected).
+   - Click counting: macOS computes the click state (1/2/3) itself for
+     real presses and taps, but not for software-posted events, and
+     upstream never set it — so double/triple presses never selected a
+     word/line. The fork sets `mouseEventClickState` the way the system
+     does (chained presses within the user's double-click interval and
+     5 px), restoring double-click word and triple-click line selection.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
