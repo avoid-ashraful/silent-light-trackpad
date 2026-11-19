@@ -39,3 +39,16 @@ jobs:
           name: Silent-Light-Trackpad-app
           path: dist/Silent-Light-Trackpad.zip
           if-no-files-found: error
+      - name: Build debug variant (frame recording)
+        run: FRAME_RECORDING=1 ./build-app.sh
+      - name: Zip debug app
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent "Silent Light Trackpad.app" "Silent-Light-Trackpad-Debug.zip"
+          ls -lh
+      - name: Upload debug app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Silent-Light-Trackpad-debug-app
+          path: dist/Silent-Light-Trackpad-Debug.zip
+          if-no-files-found: error

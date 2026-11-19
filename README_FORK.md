@@ -97,6 +97,36 @@ light click is completely silent / feel-less.
    of 30 / 40 / 50 / 60 / 80 can be chosen; the click and the synthetic
    haptic both fire at whichever threshold is selected.
 
+## Testing
+The click-decision logic lives in `Core/` (the `LightClickCore`
+library target) — a platform-free engine that consumes touch frames
+and native-event decisions and emits clicks/haptics through a
+protocol, with time, cursor position and the double-click interval
+injected. `Sources/` is a thin macOS shell around it (touch stream,
+event tap, CGEvent posting, actuator). The suite in
+`Tests/LightClickCoreTests/` drives the engine frame by frame and
+asserts the exact output sequence for every behaviour in this fork:
+press/release and hysteresis, click counting, thresholds, resting
+fingers, the two-finger lock and chords, the fast-jab path and its
+interactions, the scroll/gesture gate (dwell, anchor travel,
+velocity trigger), palm rejection, the hard-press override, native
+-event swallow/pass decisions, and reset. CI runs `swift test` on
+every push; a regression fails the build before it can merge.
+
+Frame recording (debug builds): build with `FRAME_RECORDING=1
+./build-app.sh` and the app records every touch frame, native
+event and output to `~/Library/Logs/SilentLightTrackpad/
+frames-<time>.jsonl` (the menu shows it is on). Replaying a
+recording's inputs through a fresh engine (`ReplayDriver` in
+`Core/FrameRecording.swift`) reproduces its outputs exactly — so a
+field report becomes a test: record the misbehaviour, replay it,
+watch it fail, fix, watch it pass. Release builds compile the
+recorder out entirely.
+
+What the suite cannot do: it runs the *decision logic*, not the
+app on a real trackpad — CGEvent posting, modifier flags, the
+actuator and all timing feel still need on-device confirmation.
+
 ## Build & install (must be done on the Mac — needs Xcode / Swift 6.2)
     ./build-app.sh
     # First REMOVE / restore the upstream app:
@@ -109,9 +139,9 @@ preset — 30, 40, 50, 60, or 80 g — and click. You should get the light
 click WITH a haptic thock at that selected threshold.
 
 ## Honest limits
-- NOT compiled or tested by Muse — this sandbox is Linux, there is no
-  macOS/Xcode here. The code follows two working MIT projects symbol-for-
-  symbol, but treat the first build as an experiment.
+- Compiled and logic-tested in CI on every change (see Testing
+  above); the sandbox itself is Linux with no macOS/Xcode, so
+  on-device feel remains the final check for each build.
 - Same upstream limits apply: private API (may break on a macOS update),
   ad-hoc signed / not notarized, built-in trackpad only, Tap to Click is
   temporarily disabled while it runs, gram presets are uncalibrated.
