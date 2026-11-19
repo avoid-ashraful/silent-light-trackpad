@@ -59,6 +59,18 @@ light click is completely silent / feel-less.
      being misread as a chord and killed), the two-finger lock never
      engages while a click is held, and a held click is always
      released when the touch session ends.
+   - Scroll clicks: with two or more fingers on the glass, the
+     strongest finger crossing the threshold mid-scroll used to fire
+     a click (pressures are per-finger, never summed — one loaded
+     finger is enough). The fork now classifies multi-touch movement:
+     if any finger travels ~2 mm from where the multi-touch sequence
+     began, the sequence is a scroll/gesture and clicks are
+     suppressed until all fingers lift; a genuine press with a
+     resting finger must additionally hold the threshold for 3
+     frames, which filters out the landing spike when fingers come
+     down to scroll. Single-finger presses are unchanged and still
+     fire instantly; the same gate also covers most three-finger
+     gesture cases.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
