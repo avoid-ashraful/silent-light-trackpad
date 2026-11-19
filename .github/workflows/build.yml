@@ -7,9 +7,14 @@ on:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Select newest Xcode 16
+        run: |
+          for x in /Applications/Xcode_16.4.app /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app /Applications/Xcode_16.0.app; do
+            if [ -d "$x" ]; then sudo xcode-select -s "$x"; break; fi
+          done
       - name: Toolchain versions
         run: |
           sw_vers
