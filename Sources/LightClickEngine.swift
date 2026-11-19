@@ -52,9 +52,12 @@ final class LightClickEngine {
     // the pressure spike of fingers landing to scroll never fires.
     private var activeTouchCount = 0
     private var touchAnchors: [Int32: OMSPosition] = [:]
+    private var touchLastPositions: [Int32: OMSPosition] = [:]
     private var gestureMoved = false
     private var dwellFingerID: Int32?
     private var dwellFrames = 0
+    private var hardDwellFingerID: Int32?
+    private var hardDwellFrames = 0
 
     private init() {
         threshold = UserDefaults.standard.float(forKey: "pressureThreshold")
@@ -93,9 +96,12 @@ final class LightClickEngine {
         resetSequence()
         waitForAllFingersToLift = false
         touchAnchors = [:]
+        touchLastPositions = [:]
         gestureMoved = false
         dwellFingerID = nil
         dwellFrames = 0
+        hardDwellFingerID = nil
+        hardDwellFrames = 0
         activeTouchCount = 0
         onStateChange?(false)
     }
@@ -187,14 +193,25 @@ final class LightClickEngine {
             }
         }
 
-        activeTouchCount = active.count
-        updateGestureGate(active)
+        // PALM REJECTION (fork fix, matching native): macOS filters
+        // contacts by size before anything else — a palm or the heel
+        // of a hand is not a finger: it must not press, count as a
+        // resting finger, or feed the gesture gate. The contact
+        // ellipse's major axis is in millimetres; a firm fingertip
+        // measures ~10 mm, so 20 mm is twice a finger and still below
+        // a palm. The currently tracked finger is exempt — a pressing
+        // finger flattens and its ellipse grows, and an in-flight
+        // click must never be reclassified away mid-press.
+        let fingers = active.filter { $0.id == fingerID || $0.axis.major < 20 }
 
-        if !active.isEmpty {
+        activeTouchCount = fingers.count
+        updateGestureGate(fingers)
+
+        if !fingers.isEmpty {
             lastTouchActivityTime = CACurrentMediaTime()
         }
 
-        if active.isEmpty {
+        if fingers.isEmpty {
             finishSequence()
             waitForAllFingersToLift = false
             return
@@ -217,8 +234,8 @@ final class LightClickEngine {
         //    click is the tap-fired one and belongs to that finger.
         // A second finger that only rests (low pressure) never disturbs
         // an ongoing click or drag.
-        if let fingerID, let tracked = active.first(where: { $0.id == fingerID }) {
-            if let presser = active.first(where: { $0.id != fingerID && max(0, $0.pressure) >= threshold }) {
+        if let fingerID, let tracked = fingers.first(where: { $0.id == fingerID }) {
+            if let presser = fingers.first(where: { $0.id != fingerID && max(0, $0.pressure) >= threshold }) {
                 if buttonDown, CACurrentMediaTime() - tapFiredDownAt > 0.1 {
                     // A second finger pressing while a pressure-path
                     // click is held: a chord — release ours and lock.
@@ -252,7 +269,7 @@ final class LightClickEngine {
 
         // Nobody is tracked: two or more fingers already pressing
         // together means a two-finger click — lock, don't left-click.
-        let pressing = active.filter { max(0, $0.pressure) >= threshold * 0.5 }
+        let pressing = fingers.filter { max(0, $0.pressure) >= threshold * 0.5 }
         if pressing.count > 1 {
             // Release first: a tap-fired click (fast jab landing as
             // another finger also presses) can be held at this point,
@@ -266,7 +283,7 @@ final class LightClickEngine {
 
         // Watch the strongest touch; resting fingers sit at low
         // pressure, so the one that presses stands out.
-        guard let candidate = active.max(by: { max(0, $0.pressure) < max(0, $1.pressure) }) else { return }
+        guard let candidate = fingers.max(by: { max(0, $0.pressure) < max(0, $1.pressure) }) else { return }
         fingerID = candidate.id
         handlePress(candidate)
     }
@@ -275,21 +292,37 @@ final class LightClickEngine {
     /// click logic: anchor each touch when it joins a multi-touch
     /// sequence, and classify the sequence as a scroll/gesture once
     /// any finger has travelled ~2 mm from its anchor (0.02 in the
-    /// trackpad's normalised coordinates). The classification sticks
-    /// until every finger lifts — a finger that keeps gliding after
-    /// the other one leaves is still scrolling, not pressing.
+    /// trackpad's normalised coordinates) or moved ~1.2 mm in a
+    /// single frame — a flick's speed gives it away before its
+    /// travel does. The classification sticks until every finger
+    /// lifts — a finger that keeps gliding after the other one
+    /// leaves is still scrolling, not pressing.
     private func updateGestureGate(_ active: [OMSTouchData]) {
         if active.isEmpty {
             touchAnchors = [:]
+            touchLastPositions = [:]
             gestureMoved = false
             dwellFingerID = nil
             dwellFrames = 0
+            hardDwellFingerID = nil
+            hardDwellFrames = 0
             return
         }
         guard active.count >= 2 else { return }
         let ids = Set(active.map(\.id))
         touchAnchors = touchAnchors.filter { ids.contains($0.key) }
+        touchLastPositions = touchLastPositions.filter { ids.contains($0.key) }
         for touch in active {
+            // VELOCITY TRIGGER: per-frame displacement of any finger.
+            if let last = touchLastPositions[touch.id] {
+                let vx = touch.position.x - last.x
+                let vy = touch.position.y - last.y
+                if vx * vx + vy * vy > 0.000144 {
+                    gestureMoved = true
+                }
+            }
+            touchLastPositions[touch.id] = touch.position
+
             if let anchor = touchAnchors[touch.id] {
                 let dx = touch.position.x - anchor.x
                 let dy = touch.position.y - anchor.y
@@ -303,14 +336,24 @@ final class LightClickEngine {
     }
 
     /// Whether a press by the currently handled finger may fire now.
-    /// During a classified scroll/gesture: never. With two or more
-    /// fingers down: only once the press has held the threshold for
-    /// 3 frames — a deliberate press with a resting finger holds; the
-    /// landing spike of a scroll crosses and falls back within a
-    /// frame or two. Single-finger presses are unaffected and still
-    /// fire on the first frame, exactly as before.
+    /// During a classified scroll/gesture: only a sustained hard
+    /// press (below). With two or more fingers down and no gesture:
+    /// only once the press has held the threshold for 3 frames — a
+    /// deliberate press with a resting finger holds; the landing
+    /// spike of a scroll crosses and falls back within a frame or
+    /// two. Single-finger presses are unaffected and still fire on
+    /// the first frame, exactly as before.
     private func clickGateAllowsPress() -> Bool {
-        if gestureMoved { return false }
+        if gestureMoved {
+            // HARD-PRESS OVERRIDE (fork fix, matching native): the
+            // native button channel is never vetoed by the gesture
+            // layer — press hard enough mid-scroll and a real Mac
+            // clicks. Mirror it: a finger holding twice the click
+            // threshold for 2 frames is a deliberate press, not
+            // scroll load. Ordinary scrolling sustains nothing near
+            // that, so accidental scroll clicks stay dead.
+            return hardDwellFrames >= 2
+        }
         if activeTouchCount >= 2, dwellFrames < 3 { return false }
         return true
     }
@@ -330,6 +373,20 @@ final class LightClickEngine {
             }
         } else if dwellFingerID == touch.id {
             dwellFrames = 0
+        }
+
+        // HARD-PRESS OVERRIDE bookkeeping: how long this finger has
+        // been pressing at/above twice the threshold (see
+        // clickGateAllowsPress).
+        if pressure >= threshold * 2 {
+            if hardDwellFingerID == touch.id {
+                hardDwellFrames += 1
+            } else {
+                hardDwellFingerID = touch.id
+                hardDwellFrames = 1
+            }
+        } else if hardDwellFingerID == touch.id {
+            hardDwellFrames = 0
         }
 
         if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
