@@ -25,6 +25,10 @@ final class LightClickEngine {
 
     private var fingerID: Int32?
     private var buttonDown = false
+    // CLICK COUNT (fork fix): see clickState(for:at:) below.
+    private var clickCount = 0
+    private var lastClickTime: CFTimeInterval = 0
+    private var lastClickLocation = CGPoint.zero
     private var waitForAllFingersToLift = false
     private var ignoreNativeMouseUpUntil: CFTimeInterval = 0
 
@@ -204,7 +208,32 @@ final class LightClickEngine {
             mouseButton: .left
         ) else { return }
         event.setIntegerValueField(.eventSourceUserData, value: Self.injectedMarker)
+        event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState(for: type, at: location)))
         event.post(tap: .cghidEventTap)
+    }
+
+    /// CLICK COUNT (fork fix, from Ash's on-device report): selecting a
+    /// word on double-click / a line on triple-click is driven by the
+    /// event's click state. macOS computes that itself for real presses
+    /// and taps, but NOT for software-posted events — and upstream never
+    /// set it, so every synthetic click arrived as click #1 and a fast
+    /// double press looked like two unrelated single clicks. Mirror the
+    /// system: a press within the user's double-click interval and a few
+    /// pixels of the previous one bumps the count (2 = word, 3 = line);
+    /// anything else restarts at 1. The matching mouse-up carries the
+    /// same count.
+    private func clickState(for type: CGEventType, at location: CGPoint) -> Int {
+        if type == .leftMouseDown {
+            let now = CACurrentMediaTime()
+            let dx = location.x - lastClickLocation.x
+            let dy = location.y - lastClickLocation.y
+            let chained = now - lastClickTime <= NSEvent.doubleClickInterval
+                && dx * dx + dy * dy <= 25
+            clickCount = chained ? clickCount + 1 : 1
+            lastClickTime = now
+            lastClickLocation = location
+        }
+        return max(clickCount, 1)
     }
 }
 
