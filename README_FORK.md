@@ -21,6 +21,11 @@ light click is completely silent / feel-less.
      (actuate with unknown3 = 2.0, HapticKey's begin phase).
    - On release: posts left-mouse-up AND fires the release-phase actuation
      (unknown3 = 0.0, HapticKey's end phase).
+   - Snappy release: upstream only posted mouse-up when every finger had
+     fully left the glass, so the click stayed held after you eased off
+     the pressure. The fork releases as soon as pressure falls below 70%
+     of the press threshold — the click ends when the press ends. Holding
+     pressure still holds the button (click-hold / drag unaffected).
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
