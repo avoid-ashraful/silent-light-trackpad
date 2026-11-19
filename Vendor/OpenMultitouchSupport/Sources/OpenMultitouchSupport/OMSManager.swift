@@ -16,7 +16,7 @@ public final class OMSManager: Sendable {
     private let dateFormatter = DateFormatter()
 
     private let touchDataStreamBundle = AsyncStreamBundle<[OMSTouchData]>()
-    public var touchDataStream: any AsyncShareStream<[OMSTouchData]> {
+    public var touchDataStream: AsyncStream<[OMSTouchData]> {
         touchDataStreamBundle.stream
     }
 
