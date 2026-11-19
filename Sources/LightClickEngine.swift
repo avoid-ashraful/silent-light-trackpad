@@ -157,6 +157,21 @@ final class LightClickEngine {
             // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
             HapticsController.shared.actuateClick(down: true)
         }
+
+        // SNAPPY RELEASE (fork fix, from Ash's on-device feedback): upstream
+        // only released the button in finishSequence() — when every finger
+        // had fully left the glass — so easing off the pressure changed
+        // nothing: the click stayed held until the finger was lifted off
+        // the trackpad entirely, and felt long and stretched. A real click
+        // ends when the press ends. Release as soon as pressure falls back
+        // below 70% of the press threshold; the 30% hysteresis band keeps
+        // pressure jitter near the threshold from flickering the button.
+        // Keeping pressure up still holds the button, so click-hold and
+        // click-drag keep working, and pressing again re-clicks (which is
+        // also what makes double-clicks possible).
+        if buttonDown, pressure <= threshold * 0.7 {
+            releaseButtonIfNeeded()
+        }
     }
 
     private func finishSequence() {
