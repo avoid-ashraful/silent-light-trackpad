@@ -38,6 +38,13 @@ light click is completely silent / feel-less.
      every synthetic down/up (`CGEventSource.flagsState`), so Cmd+click,
      Ctrl+click (secondary click), Shift+click and Option+click behave
      like native clicks instead of plain ones.
+   - Resting fingers: upstream required exactly one active touch, so
+     pressing while a thumb/finger rested on the pad produced no click
+     and locked input until all fingers lifted. The fork tracks the
+     pressing finger by pressure and ignores resting touches, while
+     still refusing to answer a genuine two-finger press (both fingers
+     pressing together, or a second press mid-click) with a left click —
+     that stays the native secondary click.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

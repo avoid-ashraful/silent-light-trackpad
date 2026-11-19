@@ -138,20 +138,63 @@ final class LightClickEngine {
         }
 
         guard !waitForAllFingersToLift else { return }
-        guard active.count == 1, let touch = active.first else {
-            if fingerID != nil {
-                releaseButtonIfNeeded()
-                resetSequence()
+
+        // RESTING-FINGER SUPPORT (fork fix, from the native-behaviour
+        // audit): upstream demanded exactly ONE active touch — with a
+        // thumb or second finger merely resting on the glass, pressing
+        // with another finger produced no click at all and locked input
+        // until every finger lifted. Native trackpads click fine in
+        // that posture. So: follow ONE tracked finger (the presser) and
+        // ignore the rest, with two safeguards —
+        //  * two fingers pressing together is a two-finger click
+        //    (native secondary click): never answer it with a left
+        //    click; lock until all fingers lift, as upstream did;
+        //  * a second finger pressing while our click is already down
+        //    is the same chord: release ours and lock.
+        // A second finger that only rests (low pressure) never disturbs
+        // an ongoing click or drag.
+        if let fingerID, let tracked = active.first(where: { $0.id == fingerID }) {
+            if let presser = active.first(where: { $0.id != fingerID && max(0, $0.pressure) >= threshold }) {
+                if buttonDown {
+                    releaseButtonIfNeeded()
+                    resetSequence()
+                    waitForAllFingersToLift = true
+                } else {
+                    // The watched finger turned out to be the resting
+                    // one; hand tracking to the finger actually pressing.
+                    self.fingerID = presser.id
+                    handlePress(presser)
+                }
+                return
             }
+            handlePress(tracked)
+            return
+        }
+
+        if fingerID != nil {
+            // The tracked finger lifted while other (resting) touches
+            // remain. End its sequence WITHOUT locking — a remaining
+            // finger may still press on its own.
+            releaseButtonIfNeeded()
+            resetSequence()
+        }
+
+        // Nobody is tracked: two or more fingers already pressing
+        // together means a two-finger click — lock, don't left-click.
+        let pressing = active.filter { max(0, $0.pressure) >= threshold * 0.5 }
+        if pressing.count > 1 {
             waitForAllFingersToLift = true
             return
         }
 
-        if fingerID == nil {
-            fingerID = touch.id
-        }
-        guard fingerID == touch.id else { return }
+        // Watch the strongest touch; resting fingers sit at low
+        // pressure, so the one that presses stands out.
+        guard let candidate = active.max(by: { max(0, $0.pressure) < max(0, $1.pressure) }) else { return }
+        fingerID = candidate.id
+        handlePress(candidate)
+    }
 
+    private func handlePress(_ touch: OMSTouchData) {
         let pressure = max(0, touch.pressure)
         onPressureChange?(pressure)
 
