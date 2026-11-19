@@ -98,8 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sensitivity.isEnabled = false
         menu.addItem(sensitivity)
         let presets = usesChinese
-            ? [("轻 · 40 g", 40), ("默认 · 50 g", 50), ("稳妥 · 60 g", 60), ("防误触 · 80 g", 80)]
-            : [("Light · 40 g", 40), ("Default · 50 g", 50), ("Steady · 60 g", 60), ("Guarded · 80 g", 80)]
+            ? [("极轻 · 30 g", 30), ("轻 · 40 g", 40), ("默认 · 50 g", 50), ("稳妥 · 60 g", 60), ("防误触 · 80 g", 80)]
+            : [("Very light · 30 g", 30), ("Light · 40 g", 40), ("Default · 50 g", 50), ("Steady · 60 g", 60), ("Guarded · 80 g", 80)]
         for (title, value) in presets {
             let item = NSMenuItem(title: title, action: #selector(selectThreshold(_:)), keyEquivalent: "")
             item.target = self

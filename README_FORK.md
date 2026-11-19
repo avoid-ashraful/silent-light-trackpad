@@ -16,7 +16,7 @@ light click is completely silent / feel-less.
    - Default waveform is actuation ID 4 (medium). 3 = weak, 6 = strong.
      Change `clickActuationID` in HapticsController.swift to taste.
 2. `Sources/LightClickEngine.swift`
-   - When raw pressure crosses your chosen threshold (40/50/60/80 g presets):
+   - When raw pressure crosses your chosen threshold (30/40/50/60/80 g presets):
      posts the left-mouse-down AND fires the press-phase actuation
      (actuate with unknown3 = 2.0, HapticKey's begin phase).
    - On release: posts left-mouse-up AND fires the release-phase actuation
@@ -29,6 +29,9 @@ light click is completely silent / feel-less.
    (`clickHapticEnabled` in HapticsController, default ON). ON = the
    synthetic haptic fires at the light threshold; OFF = upstream's fully
    silent light click. Toggling it ON fires one sample pulse.
+   The Sensitivity list also adds a selectable **30 g** preset, so any one
+   of 30 / 40 / 50 / 60 / 80 can be chosen; the click and the synthetic
+   haptic both fire at whichever threshold is selected.
 
 ## Build & install (must be done on the Mac — needs Xcode / Swift 6.2)
     ./build-app.sh
@@ -37,8 +40,9 @@ light click is completely silent / feel-less.
     #   so native haptics + your original Tap to Click setting come back.
     ditto "dist/Silent Light Trackpad.app" "/Applications/Silent Light Trackpad.app"
     open "/Applications/Silent Light Trackpad.app"
-Then re-grant Accessibility (the rebuilt app may need it again), pick the
-40 g preset, and click. You should get the light click WITH a haptic thock.
+Then re-grant Accessibility (the rebuilt app may need it again), pick any
+preset — 30, 40, 50, 60, or 80 g — and click. You should get the light
+click WITH a haptic thock at that selected threshold.
 
 ## Honest limits
 - NOT compiled or tested by Muse — this sandbox is Linux, there is no
