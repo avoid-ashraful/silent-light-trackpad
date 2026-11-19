@@ -80,10 +80,12 @@ final class ScrollGateTests: EngineTestCase {
         let rig = makeRig()
         var y = 0.50
         for _ in 0 ..< 4 {
+            // Trailing fingers at 20 stay below the 25 arming line,
+            // so this exercises the movement gate, not the lock.
             rig.frame(
                 rig.touch(1, 60, x: 0.35, y: y),
-                rig.touch(2, 30, x: 0.50, y: y + 0.03),
-                rig.touch(3, 30, x: 0.65, y: y + 0.06)
+                rig.touch(2, 20, x: 0.50, y: y + 0.03),
+                rig.touch(3, 20, x: 0.65, y: y + 0.06)
             )
             y += 0.015
         }
