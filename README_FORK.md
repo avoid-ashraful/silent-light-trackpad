@@ -13,8 +13,10 @@ light click is completely silent / feel-less.
      finding the built-in trackpad through IOKit (`AppleMultitouchDevice`,
      `ActuationSupported`, `Multitouch ID`) — the exact approach used by
      niw/HapticKey and RithvikVatti/thockplus (both MIT).
-   - Default waveform is actuation ID 4 (medium). 3 = weak, 6 = strong.
-     Change `clickActuationID` in HapticsController.swift to taste.
+   - Waveform strength is user-selectable in the menu's **Haptic
+     strength** section: Low = actuation ID 3 (weak), Medium = 4
+     (default), High = 6 (strong). Persisted as `clickActuationID`;
+     picking a strength fires one sample pulse so it can be felt at once.
 2. `Sources/LightClickEngine.swift`
    - When raw pressure crosses your chosen threshold (30/40/50/60/80 g presets):
      posts the left-mouse-down AND fires the press-phase actuation
