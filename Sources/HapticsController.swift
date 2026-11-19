@@ -35,10 +35,14 @@ final class HapticsController {
     private let actuateFn: ActuateFn?
     private var actuatorRef: CFTypeRef?
 
-    /// Actuation IDs are the predefined MultitouchSupport waveforms:
-    /// 3 = weak, 4 = medium, 6 = strong (HapticKey's mapping).
-    /// Change this one value to 3 if medium feels too strong.
-    var clickActuationID: Int32 = 4
+    /// Haptic strength = the predefined MultitouchSupport waveform ID:
+    /// 3 = weak (menu: Low), 4 = medium (Medium), 6 = strong (High) —
+    /// HapticKey's mapping. User-selectable in the "Haptic strength"
+    /// menu section and persisted, like the on/off toggle.
+    var clickActuationID: Int32 {
+        didSet { UserDefaults.standard.set(clickActuationID, forKey: Self.clickActuationKey) }
+    }
+    private static let clickActuationKey = "clickActuationID"
 
     /// User-toggleable click haptic (menu: "Click haptic feedback").
     /// Persisted, default ON. When OFF the app behaves like upstream:
@@ -62,6 +66,7 @@ final class HapticsController {
         actuateFn = Self.symbol("MTActuatorActuate", in: handle)
         let defaults = UserDefaults.standard
         clickHapticEnabled = defaults.object(forKey: Self.clickHapticKey) as? Bool ?? true
+        clickActuationID = (defaults.object(forKey: Self.clickActuationKey) as? NSNumber)?.int32Value ?? 4
     }
 
     private static func symbol<T>(_ name: String, in handle: UnsafeMutableRawPointer?) -> T? {

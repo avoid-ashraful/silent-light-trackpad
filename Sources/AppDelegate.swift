@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hapticsItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var thresholdItems: [NSMenuItem] = []
+    private var hapticStrengthItems: [NSMenuItem] = []
 
     private let originalTapToClickKey = "originalTapToClick"
     private let launchAtLoginConfiguredKey = "launchAtLoginEnabled"
@@ -106,6 +107,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.tag = value
             item.indentationLevel = 1
             thresholdItems.append(item)
+            menu.addItem(item)
+        }
+
+        // HAPTIC STRENGTH (fork addition): the synthetic click's waveform —
+        // Low = actuation 3 (weak), Medium = 4, High = 6 (strong).
+        let strength = NSMenuItem(title: localized("Haptic strength", "触感强度"), action: nil, keyEquivalent: "")
+        strength.isEnabled = false
+        menu.addItem(strength)
+        let strengths = usesChinese
+            ? [("低", 3), ("中", 4), ("高", 6)]
+            : [("Low", 3), ("Medium", 4), ("High", 6)]
+        for (title, value) in strengths {
+            let item = NSMenuItem(title: title, action: #selector(selectHapticStrength(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = value
+            item.indentationLevel = 1
+            hapticStrengthItems.append(item)
             menu.addItem(item)
         }
 
@@ -347,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hapticsItem?.state = haptics.clickHapticEnabled ? .on : .off
         hapticsItem?.isEnabled = true
         for item in thresholdItems { item.state = item.tag == Int(engine.threshold) ? .on : .off }
+        for item in hapticStrengthItems { item.state = item.tag == Int(haptics.clickActuationID) ? .on : .off }
         refreshLoginItem()
     }
 
@@ -387,6 +406,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectThreshold(_ sender: NSMenuItem) {
         engine.threshold = Float(sender.tag)
+        refreshMenu()
+    }
+
+    /// HAPTIC STRENGTH (fork addition): Low = waveform 3 (weak),
+    /// Medium = 4, High = 6 (strong). Fires one sample press-phase pulse
+    /// at the new strength so the change can be felt immediately
+    /// (actuateClick no-ops when the haptic toggle is off).
+    @objc private func selectHapticStrength(_ sender: NSMenuItem) {
+        haptics.clickActuationID = Int32(sender.tag)
+        haptics.actuateClick(down: true)
         refreshMenu()
     }
 
