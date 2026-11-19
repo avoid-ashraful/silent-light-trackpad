@@ -53,6 +53,12 @@ light click is completely silent / feel-less.
      is, or just was, active), swallows it, and answers with the app's
      own click on the spot. Native presses with no touch behind them
      (external mouse, other input sources) pass through untouched.
+     A follow-up interaction review hardened the corners: a tap-fired
+     click is attributed to the finger that pressed (so jabbing while
+     a thumb rests hands tracking to the jabbing finger instead of
+     being misread as a chord and killed), the two-finger lock never
+     engages while a click is held, and a held click is always
+     released when the touch session ends.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

@@ -36,6 +36,12 @@ final class LightClickEngine {
     // trackpad (a touch is, or just was, active) from one that came from
     // an external mouse or another input source (no touch anywhere near).
     private var lastTouchActivityTime: CFTimeInterval = 0
+    // When the event tap itself fired the currently held click (the
+    // fast-jab path), the moment it did so; 0 while any held click came
+    // from the pressure path. Lets the frame logic tell "this presser
+    // owns the held click" apart from "a second finger is chording
+    // against a click another finger is holding".
+    private var tapFiredDownAt: CFTimeInterval = 0
 
     private init() {
         threshold = UserDefaults.standard.float(forKey: "pressureThreshold")
@@ -138,7 +144,7 @@ final class LightClickEngine {
                 // No recent touch means an external mouse or another
                 // input source — not ours; fall through and pass it.
                 if !waitForAllFingersToLift {
-                    fireButtonDown()
+                    fireButtonDown(fromTap: true)
                 }
                 return nil
             }
@@ -183,18 +189,26 @@ final class LightClickEngine {
         //    (native secondary click): never answer it with a left
         //    click; lock until all fingers lift, as upstream did;
         //  * a second finger pressing while our click is already down
-        //    is the same chord: release ours and lock.
+        //    is the same chord: release ours and lock — unless the held
+        //    click is the tap-fired one and belongs to that finger.
         // A second finger that only rests (low pressure) never disturbs
         // an ongoing click or drag.
         if let fingerID, let tracked = active.first(where: { $0.id == fingerID }) {
             if let presser = active.first(where: { $0.id != fingerID && max(0, $0.pressure) >= threshold }) {
-                if buttonDown {
+                if buttonDown, CACurrentMediaTime() - tapFiredDownAt > 0.1 {
+                    // A second finger pressing while a pressure-path
+                    // click is held: a chord — release ours and lock.
                     releaseButtonIfNeeded()
                     resetSequence()
                     waitForAllFingersToLift = true
                 } else {
-                    // The watched finger turned out to be the resting
-                    // one; hand tracking to the finger actually pressing.
+                    // No click down: the watched finger turned out to be
+                    // the resting one — hand tracking to the presser.
+                    // Or the held click is the tap-fired one (fast jab)
+                    // and belongs to this very presser, the watched
+                    // finger being a resting one: the presser owns the
+                    // click — hand tracking over and keep it down, so a
+                    // jab with a thumb resting can still hold and drag.
                     self.fingerID = presser.id
                     handlePress(presser)
                 }
@@ -216,6 +230,12 @@ final class LightClickEngine {
         // together means a two-finger click — lock, don't left-click.
         let pressing = active.filter { max(0, $0.pressure) >= threshold * 0.5 }
         if pressing.count > 1 {
+            // Release first: a tap-fired click (fast jab landing as
+            // another finger also presses) can be held at this point,
+            // and the lock makes process() ignore frames until every
+            // finger lifts — never lock with the button down, or the
+            // click would stay held for the whole lock.
+            releaseButtonIfNeeded()
             waitForAllFingersToLift = true
             return
         }
@@ -252,18 +272,23 @@ final class LightClickEngine {
     }
 
     private func finishSequence() {
-        guard fingerID != nil else { return }
+        // Release unconditionally (releaseButtonIfNeeded self-guards):
+        // a tap-fired click can be held while no finger is tracked, and
+        // a held click must never outlive its touch session.
         releaseButtonIfNeeded()
-        resetSequence()
+        if fingerID != nil { resetSequence() }
     }
 
     /// Post our synthetic mouse-down and mark the button held. Shared by
     /// the pressure path (handlePress) and the event tap's fast-jab path
     /// (filter), so both produce the identical click: marker, click
-    /// count, modifier flags and the synthetic haptic.
-    private func fireButtonDown() {
+    /// count, modifier flags and the synthetic haptic. The tap path
+    /// passes fromTap so the frame logic can attribute the held click
+    /// to the finger whose native press the tap just answered.
+    private func fireButtonDown(fromTap: Bool = false) {
         postMouseEvent(type: .leftMouseDown)
         buttonDown = true
+        tapFiredDownAt = fromTap ? CACurrentMediaTime() : 0
         // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
         HapticsController.shared.actuateClick(down: true)
     }
@@ -274,6 +299,7 @@ final class LightClickEngine {
         // HAPTIC FORK ADDITION: release-phase haptic, mirroring a real click's up-stroke.
         HapticsController.shared.actuateClick(down: false)
         buttonDown = false
+        tapFiredDownAt = 0
         ignoreNativeMouseUpUntil = CACurrentMediaTime() + 0.15
     }
 
