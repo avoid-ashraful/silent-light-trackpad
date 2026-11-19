@@ -209,6 +209,14 @@ final class LightClickEngine {
         ) else { return }
         event.setIntegerValueField(.eventSourceUserData, value: Self.injectedMarker)
         event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState(for: type, at: location)))
+        // MODIFIER KEYS (fork fix, from the native-behaviour audit): a real
+        // click carries the modifiers held at that moment — Cmd+click opens
+        // a link in a new tab, Ctrl+click acts as a secondary click,
+        // Shift+click extends a selection. The engine never set flags on
+        // its synthetic events, leaving that to undocumented event-source
+        // inheritance. Copy the live HID modifier state explicitly so
+        // modified clicks behave exactly like native ones.
+        event.flags = CGEventSource.flagsState(.hidSystemState)
         event.post(tap: .cghidEventTap)
     }
 

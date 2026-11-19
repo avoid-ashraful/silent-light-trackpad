@@ -34,6 +34,10 @@ light click is completely silent / feel-less.
      word/line. The fork sets `mouseEventClickState` the way the system
      does (chained presses within the user's double-click interval and
      5 px), restoring double-click word and triple-click line selection.
+   - Modifier keys: the fork copies the live HID modifier state onto
+     every synthetic down/up (`CGEventSource.flagsState`), so Cmd+click,
+     Ctrl+click (secondary click), Shift+click and Option+click behave
+     like native clicks instead of plain ones.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
