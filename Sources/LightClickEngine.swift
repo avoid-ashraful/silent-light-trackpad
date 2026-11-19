@@ -31,6 +31,11 @@ final class LightClickEngine {
     private var lastClickLocation = CGPoint.zero
     private var waitForAllFingersToLift = false
     private var ignoreNativeMouseUpUntil: CFTimeInterval = 0
+    // FAST-JAB FIX: last time a touch frame showed a finger on the glass.
+    // The event tap uses it to tell a native press that came from the
+    // trackpad (a touch is, or just was, active) from one that came from
+    // an external mouse or another input source (no touch anywhere near).
+    private var lastTouchActivityTime: CFTimeInterval = 0
 
     private init() {
         threshold = UserDefaults.standard.float(forKey: "pressureThreshold")
@@ -111,8 +116,32 @@ final class LightClickEngine {
             return Unmanaged.passUnretained(event)
         }
 
-        if buttonDown, type == .leftMouseDown {
-            return nil
+        if type == .leftMouseDown {
+            if buttonDown {
+                // Our click is already down — the usual order, since the
+                // light pressure click fires before the finger reaches
+                // Apple's heavier native threshold. Swallow the native
+                // press so one press stays one click.
+                return nil
+            }
+            if CACurrentMediaTime() - lastTouchActivityTime <= 0.15 {
+                // FAST-JAB FIX (fork fix): a fast, hard jab can cross
+                // Apple's native threshold before the next pressure frame
+                // is processed, so the native click wins the race against
+                // the touch stream and slips through as a real click —
+                // followed a frame later by ours: one jab, two clicks.
+                // A native press while a trackpad touch is active IS
+                // that press: swallow it and answer with our own click
+                // right now — the same event the pressure path posts,
+                // haptic and click count included. (Unless the engine is
+                // locked for a multi-finger press; then just swallow.)
+                // No recent touch means an external mouse or another
+                // input source — not ours; fall through and pass it.
+                if !waitForAllFingersToLift {
+                    fireButtonDown()
+                }
+                return nil
+            }
         }
 
         if type == .leftMouseUp,
@@ -129,6 +158,10 @@ final class LightClickEngine {
             case .starting, .making, .touching, .breaking: true
             default: false
             }
+        }
+
+        if !active.isEmpty {
+            lastTouchActivityTime = CACurrentMediaTime()
         }
 
         if active.isEmpty {
@@ -199,10 +232,7 @@ final class LightClickEngine {
         onPressureChange?(pressure)
 
         if !buttonDown, pressure >= threshold {
-            postMouseEvent(type: .leftMouseDown)
-            buttonDown = true
-            // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
-            HapticsController.shared.actuateClick(down: true)
+            fireButtonDown()
         }
 
         // SNAPPY RELEASE (fork fix, from Ash's on-device feedback): upstream
@@ -225,6 +255,17 @@ final class LightClickEngine {
         guard fingerID != nil else { return }
         releaseButtonIfNeeded()
         resetSequence()
+    }
+
+    /// Post our synthetic mouse-down and mark the button held. Shared by
+    /// the pressure path (handlePress) and the event tap's fast-jab path
+    /// (filter), so both produce the identical click: marker, click
+    /// count, modifier flags and the synthetic haptic.
+    private func fireButtonDown() {
+        postMouseEvent(type: .leftMouseDown)
+        buttonDown = true
+        // HAPTIC FORK ADDITION: synthetic click haptic at the light threshold.
+        HapticsController.shared.actuateClick(down: true)
     }
 
     private func releaseButtonIfNeeded() {
