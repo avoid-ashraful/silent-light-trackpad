@@ -95,9 +95,11 @@ final class HapticsController {
         let phase: Float32 = down ? 2.0 : 0.0
         if actuateFn(actuatorRef, clickActuationID, 0, 0.0, phase) != 0 {
             // Reopen once and retry, mirroring HapticKey's recovery.
+            // Note: `actuatorRef` here is still the guard-bound (now closed)
+            // ref, so the reopened one must come from the property itself.
             closeActuatorIfOpen()
-            guard ensureActuatorOpen(), let actuatorRef else { return }
-            _ = actuateFn(actuatorRef, clickActuationID, 0, 0.0, phase)
+            guard ensureActuatorOpen(), let reopenedRef = self.actuatorRef else { return }
+            _ = actuateFn(reopenedRef, clickActuationID, 0, 0.0, phase)
         }
     }
 
