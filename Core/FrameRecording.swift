@@ -16,6 +16,7 @@ public enum RecordedEvent: Equatable, Codable {
     case nativeMove(time: Double, x: Double, y: Double)
     case thresholdChanged(time: Double, value: Double)
     case outputDown(time: Double, x: Double, y: Double, clickState: Int)
+    case outputDragged(time: Double, x: Double, y: Double, clickState: Int)
     case outputUp(time: Double, x: Double, y: Double, clickState: Int)
     case outputHaptic(time: Double, down: Bool)
 
@@ -29,6 +30,7 @@ public enum RecordedEvent: Equatable, Codable {
              let .nativeMove(time, _, _),
              let .thresholdChanged(time, _),
              let .outputDown(time, _, _, _),
+             let .outputDragged(time, _, _, _),
              let .outputUp(time, _, _, _),
              let .outputHaptic(time, _):
             time
@@ -39,7 +41,7 @@ public enum RecordedEvent: Equatable, Codable {
     /// it consumed).
     public var isOutput: Bool {
         switch self {
-        case .outputDown, .outputUp, .outputHaptic: true
+        case .outputDown, .outputDragged, .outputUp, .outputHaptic: true
         default: false
         }
     }
@@ -103,11 +105,15 @@ public enum ReplayDriver {
         var events: [RecordedEvent] = []
         var now: () -> Double = { 0 }
 
-        func postMouseDown(at point: ClickPoint, clickState: Int) {
+        func postMouseDown(at point: ClickPoint, clickState: Int, eventNumber: Int) {
             events.append(.outputDown(time: now(), x: point.x, y: point.y, clickState: clickState))
         }
 
-        func postMouseUp(at point: ClickPoint, clickState: Int) {
+        func postMouseDragged(at point: ClickPoint, clickState: Int, eventNumber: Int) {
+            events.append(.outputDragged(time: now(), x: point.x, y: point.y, clickState: clickState))
+        }
+
+        func postMouseUp(at point: ClickPoint, clickState: Int, eventNumber: Int) {
             events.append(.outputUp(time: now(), x: point.x, y: point.y, clickState: clickState))
         }
 
@@ -146,9 +152,13 @@ public enum ReplayDriver {
                 _ = engine.handleNativeMouseUp()
             case let .nativeMove(_, x, y):
                 cursor = ClickPoint(x: x, y: y)
+                // A move while the button is held produces the
+                // engine's own dragged event, exactly as in the
+                // live session.
+                _ = engine.handleNativeMouseMove(at: cursor)
             case let .thresholdChanged(_, value):
                 engine.threshold = value
-            case .outputDown, .outputUp, .outputHaptic:
+            case .outputDown, .outputDragged, .outputUp, .outputHaptic:
                 break // Outputs are what the replay produces, not inputs.
             }
         }

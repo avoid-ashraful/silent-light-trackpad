@@ -47,7 +47,8 @@ public struct ClickPoint: Equatable, Codable, Sendable {
 /// itself: every producer and consumer lives on the main actor.
 @MainActor
 public protocol ClickOutput: AnyObject {
-    func postMouseDown(at point: ClickPoint, clickState: Int)
-    func postMouseUp(at point: ClickPoint, clickState: Int)
+    func postMouseDown(at point: ClickPoint, clickState: Int, eventNumber: Int)
+    func postMouseDragged(at point: ClickPoint, clickState: Int, eventNumber: Int)
+    func postMouseUp(at point: ClickPoint, clickState: Int, eventNumber: Int)
     func pulseHaptic(down: Bool)
 }

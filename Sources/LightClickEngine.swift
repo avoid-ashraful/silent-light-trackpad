@@ -170,11 +170,19 @@ final class LightClickEngine {
         if type == .mouseMoved || type == .leftMouseDragged {
             let location = event.location
             recorder?.record(.nativeMove(time: CACurrentMediaTime(), x: Double(location.x), y: Double(location.y)))
-        }
-
-        if core.shouldConvertMoveToDrag, type == .mouseMoved {
-            event.type = .leftMouseDragged
-            return Unmanaged.passUnretained(event)
+            // While our synthetic button is held, this movement
+            // belongs to our press: the core answers with its own
+            // dragged event — built like our down/up, with the
+            // press's click state and event number, which is what
+            // makes macOS treat the sequence as a single drag —
+            // and the native event is swallowed. (Mutating the
+            // moved event's type, as the original app did, kept
+            // the hardware event number and broke drags in
+            // Chromium browsers and Mission Control.) With no
+            // button held the event passes untouched.
+            if core.handleNativeMouseMove(at: ClickPoint(x: Double(location.x), y: Double(location.y))) {
+                return nil
+            }
         }
 
         if type == .leftMouseDown {
@@ -208,13 +216,18 @@ private final class SystemClickOutput: ClickOutput {
         self.record = record
     }
 
-    func postMouseDown(at point: ClickPoint, clickState: Int) {
-        post(type: .leftMouseDown, at: point, clickState: clickState)
+    func postMouseDown(at point: ClickPoint, clickState: Int, eventNumber: Int) {
+        post(type: .leftMouseDown, at: point, clickState: clickState, eventNumber: eventNumber)
         record(.outputDown(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
     }
 
-    func postMouseUp(at point: ClickPoint, clickState: Int) {
-        post(type: .leftMouseUp, at: point, clickState: clickState)
+    func postMouseDragged(at point: ClickPoint, clickState: Int, eventNumber: Int) {
+        post(type: .leftMouseDragged, at: point, clickState: clickState, eventNumber: eventNumber)
+        record(.outputDragged(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
+    }
+
+    func postMouseUp(at point: ClickPoint, clickState: Int, eventNumber: Int) {
+        post(type: .leftMouseUp, at: point, clickState: clickState, eventNumber: eventNumber)
         record(.outputUp(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
     }
 
@@ -223,7 +236,7 @@ private final class SystemClickOutput: ClickOutput {
         record(.outputHaptic(time: CACurrentMediaTime(), down: down))
     }
 
-    private func post(type: CGEventType, at point: ClickPoint, clickState: Int) {
+    private func post(type: CGEventType, at point: ClickPoint, clickState: Int, eventNumber: Int) {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             mouseEventSource: source,
@@ -233,6 +246,13 @@ private final class SystemClickOutput: ClickOutput {
         ) else { return }
         event.setIntegerValueField(.eventSourceUserData, value: LightClickEngine.injectedMarker)
         event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
+        // DRAG EVENT NUMBER: every event of one press — down,
+        // dragged, up — carries the same kCGMouseEventNumber.
+        // Without it macOS does not treat the sequence as a single
+        // drag (Chromium's remoting injector documents the same
+        // requirement), and stream-driven drags — browser tabs,
+        // Mission Control windows — never start.
+        event.setIntegerValueField(.mouseEventNumber, value: Int64(eventNumber))
         // MODIFIER KEYS (fork fix, from the native-behaviour audit): a
         // real click carries the modifiers held at that moment —
         // Cmd+click opens a link in a new tab, Ctrl+click acts as a

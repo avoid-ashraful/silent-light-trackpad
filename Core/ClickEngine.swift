@@ -55,6 +55,17 @@ public final class ClickEngine {
     // only at near-zero pressure or when every finger lifts.
     private var dragOrigin: ClickPoint?
     public private(set) var dragLatched = false
+    // DRAG EVENT NUMBER: macOS treats a mouse-down / dragged /
+    // mouse-up sequence as ONE drag only when every event in it
+    // carries the same kCGMouseEventNumber (Chromium's remoting
+    // injector documents the same requirement: mismatched numbers
+    // and window dragging silently stops being a drag). A real
+    // press gets one number from the hardware for its whole
+    // sequence; a synthetic press must assign its own. The counter
+    // increments once per press; the active press's number is
+    // stamped on its down, every dragged event and its up.
+    private var eventSequence = 0
+    private var activeEventNumber = 0
     // SCROLL/GESTURE GATE: state for telling a two-finger
     // scroll/gesture apart from a press with a resting finger.
     // Anchors remember where each touch was when the current
@@ -235,10 +246,30 @@ public final class ClickEngine {
         buttonDown || nowProvider() < ignoreNativeMouseUpUntil
     }
 
-    /// Whether a native mouse-moved event should be converted into
-    /// a left-dragged event (our synthetic button is held, so the
-    /// movement is a drag).
-    public var shouldConvertMoveToDrag: Bool { buttonDown }
+    /// A native mouse-moved or left-mouse-dragged event reached
+    /// the event tap. While our synthetic button is held, the
+    /// movement belongs to our press: returns true (the platform
+    /// layer swallows the native event) and posts our own dragged
+    /// event in its place — a first-class event built exactly like
+    /// our down/up, carrying the press's click state and event
+    /// number. (The original app instead mutated the moved event's
+    /// type in the tap; the mutated event kept the hardware
+    /// movement's own event number and a click state of 0, so the
+    /// sequence's numbers never matched the down's and macOS did
+    /// not treat it as a single drag — tab drags in Chromium
+    /// browsers and window drags in Mission Control silently never
+    /// started, while AppKit drag sessions, which the window
+    /// server drives itself once initiated, survived.) With no
+    /// button held, returns false and the event passes untouched.
+    public func handleNativeMouseMove(at point: ClickPoint) -> Bool {
+        guard buttonDown else { return false }
+        output?.postMouseDragged(
+            at: point,
+            clickState: max(clickCount, 1),
+            eventNumber: activeEventNumber
+        )
+        return true
+    }
 
     // MARK: - Lifecycle
 
@@ -432,7 +463,13 @@ public final class ClickEngine {
     /// the tap just answered.
     private func fireButtonDown(fromTap: Bool = false) {
         let location = cursorProvider()
-        output?.postMouseDown(at: location, clickState: clickStateForDown(at: location))
+        eventSequence += 1
+        activeEventNumber = eventSequence
+        output?.postMouseDown(
+            at: location,
+            clickState: clickStateForDown(at: location),
+            eventNumber: activeEventNumber
+        )
         buttonDown = true
         tapFiredDownAt = fromTap ? nowProvider() : 0
         dragOrigin = location
@@ -443,7 +480,11 @@ public final class ClickEngine {
 
     private func releaseButtonIfNeeded() {
         guard buttonDown else { return }
-        output?.postMouseUp(at: cursorProvider(), clickState: max(clickCount, 1))
+        output?.postMouseUp(
+            at: cursorProvider(),
+            clickState: max(clickCount, 1),
+            eventNumber: activeEventNumber
+        )
         // Release-phase haptic, mirroring a real click's up-stroke.
         output?.pulseHaptic(down: false)
         buttonDown = false

@@ -71,6 +71,19 @@ light click is completely silent / feel-less.
      down to scroll. Single-finger presses are unchanged and still
      fire instantly; the same gate also covers most three-finger
      gesture cases.
+   - Drag event numbers: even with the latch, tab drags in
+     Chromium browsers and window drags in Mission Control never
+     started, while Finder drags worked. Root cause: macOS treats
+     a down / dragged / up sequence as one drag only when every
+     event shares the same kCGMouseEventNumber (Chromium's own
+     remoting injector documents the requirement). Upstream
+     mutated hardware mouseMoved events into dragged ones in its
+     event tap, so the dragged events kept the hardware movements'
+     unrelated event numbers and a click state of 0. The fork now
+     assigns each press an event number (incremented per press)
+     stamped on its down, its up, and a dragged event the engine
+     itself posts for every movement while the button is held —
+     the native movement is swallowed and replaced, never mutated.
    - Drag latch: the snappy release (70% of threshold) also fired
      mid-drag — sliding a finger sideways rolls the contact, the
      pressure reading dips, and the button let go a fraction of a
@@ -119,7 +132,8 @@ press/release and hysteresis, click counting, thresholds, resting
 fingers, the two-finger lock and chords, the fast-jab path and its
 interactions, the scroll/gesture gate (dwell, anchor travel,
 velocity trigger), palm rejection, the hard-press override, the
-drag latch, native-event swallow/pass decisions, and reset. CI runs `swift test` on
+drag latch, drag event numbers and dragged-event replacement,
+native-event swallow/pass decisions, and reset. CI runs `swift test` on
 every push; a regression fails the build before it can merge.
 
 Frame recording (debug builds): build with `FRAME_RECORDING=1

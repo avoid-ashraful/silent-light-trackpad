@@ -68,17 +68,21 @@ final class NativeEventTests: EngineTestCase {
         XCTAssertEqual(rig.log, [])
     }
 
-    /// Move-to-drag conversion is exactly "our button is held".
-    func testDragConversionFlagFollowsButton() {
+    /// A native move is replaced by the engine's own dragged
+    /// event exactly while our button is held; with no button
+    /// held it passes untouched and posts nothing.
+    func testMoveReplacementFollowsButton() {
         let rig = makeRig(threshold: 50)
 
-        XCTAssertFalse(rig.engine.shouldConvertMoveToDrag)
+        XCTAssertFalse(rig.move(to: ClickPoint(x: 510, y: 500)))
+        XCTAssertEqual(rig.log, [])
 
         rig.frame(rig.touch(1, 60))
-        XCTAssertTrue(rig.engine.shouldConvertMoveToDrag)
+        XCTAssertTrue(rig.move(to: ClickPoint(x: 520, y: 500)))
+        XCTAssertTrue(rig.log.contains("drag(1)@520,500"))
 
         rig.liftAll()
-        XCTAssertFalse(rig.engine.shouldConvertMoveToDrag)
+        XCTAssertFalse(rig.move(to: ClickPoint(x: 530, y: 500)))
     }
 
     /// A native down 0.2 s after the last touch activity is outside
