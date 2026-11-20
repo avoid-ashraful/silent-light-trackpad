@@ -10,6 +10,7 @@ final class RigClock {
 }
 
 /// Records every call the engine makes, as compact strings:
+<<<<<<< HEAD
 /// `down(1)@500,500`, `drag(1)@520,500`, `up(1)`, `hapticDown`,
 /// `hapticUp`. The event number stamped on each posted mouse
 /// event is recorded in parallel in `numbers`.
@@ -31,6 +32,19 @@ final class FakeOutput: ClickOutput {
     func postMouseUp(at point: ClickPoint, clickState: Int, eventNumber: Int) {
         log.append("up(\(clickState))")
         numbers.append(eventNumber)
+=======
+/// `down(1)@500,500`, `up(1)`, `hapticDown`, `hapticUp`.
+@MainActor
+final class FakeOutput: ClickOutput {
+    var log: [String] = []
+
+    func postMouseDown(at point: ClickPoint, clickState: Int) {
+        log.append("down(\(clickState))@\(Int(point.x)),\(Int(point.y))")
+    }
+
+    func postMouseUp(at point: ClickPoint, clickState: Int) {
+        log.append("up(\(clickState))")
+>>>>>>> ci/swift61-build-test
     }
 
     func pulseHaptic(down: Bool) {
@@ -100,6 +114,7 @@ final class TestRig {
         engine.handleNativeMouseUp()
     }
 
+<<<<<<< HEAD
     /// A native mouse move (or native dragged event) reaching the
     /// tap at a screen point; the rig's cursor moves there too, as
     /// the real cursor would be. Returns true when the engine
@@ -117,6 +132,12 @@ final class TestRig {
     func clearLog() {
         output.log = []
         output.numbers = []
+=======
+    var log: [String] { output.log }
+
+    func clearLog() {
+        output.log = []
+>>>>>>> ci/swift61-build-test
     }
 }
 
