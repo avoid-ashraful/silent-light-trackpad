@@ -1,4 +1,4 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 6.0
 
 import PackageDescription
 
@@ -6,7 +6,7 @@ let package = Package(
     name: "SilentLightTrackpad",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(url: "https://github.com/Kyome22/OpenMultitouchSupport.git", from: "4.0.0")
+        .package(path: "Vendor/OpenMultitouchSupport")
     ],
     targets: [
         // The click-decision engine, free of platform APIs so it can

@@ -7,7 +7,7 @@ cd "$project_dir"
 # FRAME_RECORDING=1 builds the debug variant: the frame recorder is
 # compiled in and every touch frame / native event / output is
 # logged to ~/Library/Logs/SilentLightTrackpad/ for replay in tests.
-swift_args=()
+swift_args=(--arch arm64)
 if [[ "${FRAME_RECORDING:-0}" == "1" ]]; then
     swift_args+=(-Xswiftc -DFRAME_RECORDING)
 fi
