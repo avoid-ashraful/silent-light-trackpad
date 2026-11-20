@@ -71,6 +71,15 @@ light click is completely silent / feel-less.
      down to scroll. Single-finger presses are unchanged and still
      fire instantly; the same gate also covers most three-finger
      gesture cases.
+   - Drag latch: the snappy release (70% of threshold) also fired
+     mid-drag — sliding a finger sideways rolls the contact, the
+     pressure reading dips, and the button let go a fraction of a
+     second into the drag, cancelling browser tab drags outright
+     (Finder drags only dropped early, which looked like success).
+     Once a held click has moved the cursor ~5 px it is a drag and
+     latches like a physical button: it releases only when pressure
+     falls to ~10% of the threshold or every finger lifts. Clicks
+     that never move keep the snappy release unchanged.
    - Native-parity round (after researching how macOS itself does
      it — the native click is one fused strain-gauge force computed
      in firmware, a signal MultitouchSupport never exposes, so the
@@ -109,8 +118,8 @@ asserts the exact output sequence for every behaviour in this fork:
 press/release and hysteresis, click counting, thresholds, resting
 fingers, the two-finger lock and chords, the fast-jab path and its
 interactions, the scroll/gesture gate (dwell, anchor travel,
-velocity trigger), palm rejection, the hard-press override, native
--event swallow/pass decisions, and reset. CI runs `swift test` on
+velocity trigger), palm rejection, the hard-press override, the
+drag latch, native-event swallow/pass decisions, and reset. CI runs `swift test` on
 every push; a regression fails the build before it can merge.
 
 Frame recording (debug builds): build with `FRAME_RECORDING=1

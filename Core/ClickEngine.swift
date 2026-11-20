@@ -49,6 +49,12 @@ public final class ClickEngine {
     // tell "this presser owns the held click" apart from "a second
     // finger is chording against a click another finger is holding".
     private var tapFiredDownAt: Double = 0
+    // DRAG LATCH: where the cursor was when the current click
+    // fired, and whether the held click has moved far enough to
+    // count as a drag (see handlePress). A latched drag releases
+    // only at near-zero pressure or when every finger lifts.
+    private var dragOrigin: ClickPoint?
+    public private(set) var dragLatched = false
     // SCROLL/GESTURE GATE: state for telling a two-finger
     // scroll/gesture apart from a press with a resting finger.
     // Anchors remember where each touch was when the current
@@ -242,6 +248,8 @@ public final class ClickEngine {
     /// separately.)
     public func reset() {
         releaseButtonIfNeeded()
+        dragLatched = false
+        dragOrigin = nil
         resetSequence()
         waitForAllFingersToLift = false
         touchAnchors = [:]
@@ -363,6 +371,29 @@ public final class ClickEngine {
             fireButtonDown()
         }
 
+        // DRAG LATCH: once a held click has actually moved the
+        // cursor ~5 px it is a drag, not a click — and a drag must
+        // hold like a physical button. A physical button latches:
+        // once it clicks, it stays down until the press is nearly
+        // fully released; it does not pop back up at the first
+        // ease. Sliding a finger sideways rolls the contact, so the
+        // capacitive pressure reading dips mid-drag — under the
+        // plain 70% release line below, that dip posted mouse-up a
+        // fraction of a second into the drag and cancelled it
+        // (browser tab drags died outright; Finder drags merely
+        // dropped early, which looked like success). So once the
+        // cursor has travelled, the drag is latched and only a
+        // near-full release — or lifting every finger, which
+        // finishSequence already handles — lets go.
+        if buttonDown, !dragLatched, let dragOrigin {
+            let cursor = cursorProvider()
+            let dx = cursor.x - dragOrigin.x
+            let dy = cursor.y - dragOrigin.y
+            if dx * dx + dy * dy > 25 {
+                dragLatched = true
+            }
+        }
+
         // SNAPPY RELEASE (from on-device feedback): the original app
         // only released the button when every finger had fully left
         // the glass, so easing off the pressure changed nothing: the
@@ -374,8 +405,11 @@ public final class ClickEngine {
         // threshold from flickering the button. Keeping pressure up
         // still holds the button, so click-hold and click-drag keep
         // working, and pressing again re-clicks (which is also what
-        // makes double-clicks possible).
-        if buttonDown, pressure <= threshold * 0.7 {
+        // makes double-clicks possible). The one exception is a
+        // latched drag (above): its release line is ~10% of the
+        // threshold — near zero — so a pressure dip mid-drag can
+        // never let go early.
+        if buttonDown, pressure <= (dragLatched ? threshold * 0.1 : threshold * 0.7) {
             releaseButtonIfNeeded()
         }
     }
@@ -401,6 +435,8 @@ public final class ClickEngine {
         output?.postMouseDown(at: location, clickState: clickStateForDown(at: location))
         buttonDown = true
         tapFiredDownAt = fromTap ? nowProvider() : 0
+        dragOrigin = location
+        dragLatched = false
         // Synthetic click haptic at the light threshold.
         output?.pulseHaptic(down: true)
     }
@@ -412,6 +448,8 @@ public final class ClickEngine {
         output?.pulseHaptic(down: false)
         buttonDown = false
         tapFiredDownAt = 0
+        dragLatched = false
+        dragOrigin = nil
         ignoreNativeMouseUpUntil = nowProvider() + 0.15
     }
 
