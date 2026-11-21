@@ -974,9 +974,7 @@ struct ScrollRestingHandScenarioTests {
         let p = Press(finger: 7, x: 0.55, y: 0.5, peak: threshold * 1.4, holdFrames: 5)
         performer.play(p.curve.map { [Self.thumb(), Contact(id: 7, x: 0.55, y: 0.5, pressure: $0)] }, native: .auto, lift: false)
         performer.play([[Self.thumb()]], native: .auto)
-        withKnownIssue("BUG: a stationary resting thumb keeps the scroll's gesture flag alive, so light clicks after the scroll are dropped until the thumb lifts") {
-            expectOutcome(performer, clicks: 1, "threshold \(threshold)")
-        }
+        expectOutcome(performer, clicks: 1, "threshold \(threshold)")
     }
 
     /// Thumb resting, the index finger moves the pointer to a button
@@ -996,9 +994,7 @@ struct ScrollRestingHandScenarioTests {
         performer.play(p.curve.map { [Self.thumb(), Contact(id: 7, x: 0.55, y: 0.5, pressure: $0)] }, pointer: 7,
                        native: .auto, lift: false)
         performer.play([[Self.thumb()]], native: .auto)
-        withKnownIssue("BUG: pointing with one finger while a thumb rests trips the scroll gate, so the following light click is dropped") {
-            expectOutcome(performer, clicks: 1, "threshold \(threshold)")
-        }
+        expectOutcome(performer, clicks: 1, "threshold \(threshold)")
     }
 }
 

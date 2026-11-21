@@ -82,6 +82,15 @@ public final class ClickEngine {
     private var dwellFrames = 0
     private var hardDwellFingerID: Int32?
     private var hardDwellFrames = 0
+    // SCROLL/GESTURE GATE: fingers that have travelled in the
+    // current multi-touch sequence. Only two or more moving fingers
+    // make a scroll/gesture; one finger moving while the others stay
+    // put is pointing with a resting thumb (see updateGestureGate).
+    private var movedFingers: Set<Int32> = []
+    // TWO-FINGER CLICK: each finger's recent pressure readings
+    // (engine time, pressure), kept for ~0.12 s, to tell a finger
+    // that is pressing right now from one that is merely resting.
+    private var pressureHistory: [Int32: [(t: Double, p: Double)]] = [:]
 
     public init(
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
@@ -117,6 +126,7 @@ public final class ClickEngine {
         let fingers = touches.filter { $0.id == fingerID || $0.majorAxis < 20 }
 
         activeTouchCount = fingers.count
+        updatePressureHistory(fingers)
         updateGestureGate(fingers)
 
         if !fingers.isEmpty {
@@ -130,6 +140,25 @@ public final class ClickEngine {
         }
 
         guard !waitForAllFingersToLift else { return }
+
+        // TWO-FINGER CLICK (from the scenario suite): real fingers
+        // land light and press together, so by the time either is
+        // over half the threshold one of them is already tracked,
+        // and the "nobody tracked" lock below was never reached —
+        // the tracked finger fired a LEFT click on top of macOS's
+        // own secondary click. So, whenever no click is held: two or
+        // more fingers pressing at the same moment is a two-finger
+        // click — lock until every finger lifts. "Pressing" means
+        // at least half the threshold AND risen by a quarter of the
+        // threshold (12 units at least) within the last ~0.12 s: a
+        // resting thumb holds
+        // steady (even above half the threshold at low presets), a
+        // co-pressing finger climbs.
+        if !buttonDown, fingers.filter({ isCoPressing($0) }).count >= 2 {
+            if fingerID != nil { resetSequence() }
+            waitForAllFingersToLift = true
+            return
+        }
 
         // RESTING-FINGER SUPPORT (from the native-behaviour audit):
         // the original app demanded exactly ONE active touch — with
@@ -291,23 +320,33 @@ public final class ClickEngine {
         hardDwellFingerID = nil
         hardDwellFrames = 0
         activeTouchCount = 0
+        movedFingers = []
+        pressureHistory = [:]
     }
 
     // MARK: - Gesture gate
 
     /// SCROLL/GESTURE GATE bookkeeping, run on every frame before
     /// any click logic: anchor each touch when it joins a
-    /// multi-touch sequence, and classify the sequence as a
-    /// scroll/gesture once any finger has travelled ~2 mm from its
-    /// anchor (0.02 in the trackpad's normalised coordinates) or
-    /// moved ~1.2 mm in a single frame — a flick's speed gives it
-    /// away before its travel does. The classification sticks until
-    /// every finger lifts — a finger that keeps gliding after the
-    /// other one leaves is still scrolling, not pressing.
+    /// multi-touch sequence, and mark a finger as moved once it has
+    /// travelled ~2 mm from its anchor (0.02 in the trackpad's
+    /// normalised coordinates) or ~1.2 mm in a single frame — a
+    /// flick's speed gives it away before its travel does. The
+    /// sequence is a scroll/gesture once TWO or more fingers have
+    /// moved: scrolls, swipes, pinches and rotations move every
+    /// finger, while one finger moving with the others still is
+    /// pointing (or dragging) with a resting thumb, which macOS
+    /// treats as ordinary pointing — the original rule (any one
+    /// finger moving) killed every light click after the index
+    /// moved the cursor while a thumb rested, until the thumb
+    /// lifted. The classification sticks until every finger lifts —
+    /// a finger that keeps gliding after the other one leaves is
+    /// still scrolling, not pressing.
     private func updateGestureGate(_ active: [TouchSample]) {
         if active.isEmpty {
             touchAnchors = [:]
             touchLastPositions = [:]
+            movedFingers = []
             gestureMoved = false
             dwellFingerID = nil
             dwellFrames = 0
@@ -315,17 +354,39 @@ public final class ClickEngine {
             hardDwellFrames = 0
             return
         }
-        guard active.count >= 2 else { return }
         let ids = Set(active.map(\.id))
+        movedFingers = movedFingers.intersection(ids)
+        // RESTING FINGERS OUTLAST A GESTURE: once every finger that
+        // moved has lifted, the fingers still down never moved —
+        // a thumb resting through a scroll. The scroll is over; they
+        // must not keep it alive (light clicks stayed dead until the
+        // thumb lifted). A finger that moved and is still down keeps
+        // the classification: it is still gliding.
+        if gestureMoved, movedFingers.isEmpty {
+            gestureMoved = false
+            hardDwellFingerID = nil
+            hardDwellFrames = 0
+        }
+        guard active.count >= 2 else {
+            // A lone finger is never a gesture by itself. Forget the
+            // anchors so the next multi-touch sequence anchors fresh:
+            // a stale position for a lifted (or since-moved) touch
+            // would read as a jump the moment a second finger lands —
+            // and touch IDs are reused (a reused ID's old spot looked
+            // like a flick, killing the click).
+            touchAnchors = [:]
+            touchLastPositions = [:]
+            return
+        }
         touchAnchors = touchAnchors.filter { ids.contains($0.key) }
         touchLastPositions = touchLastPositions.filter { ids.contains($0.key) }
         for touch in active {
-            // VELOCITY TRIGGER: per-frame displacement of any finger.
+            // VELOCITY TRIGGER: per-frame displacement of this finger.
             if let last = touchLastPositions[touch.id] {
                 let vx = touch.x - last.x
                 let vy = touch.y - last.y
                 if vx * vx + vy * vy > 0.000144 {
-                    gestureMoved = true
+                    movedFingers.insert(touch.id)
                 }
             }
             touchLastPositions[touch.id] = ClickPoint(x: touch.x, y: touch.y)
@@ -334,12 +395,43 @@ public final class ClickEngine {
                 let dx = touch.x - anchor.x
                 let dy = touch.y - anchor.y
                 if dx * dx + dy * dy > 0.0004 {
-                    gestureMoved = true
+                    movedFingers.insert(touch.id)
                 }
             } else {
                 touchAnchors[touch.id] = ClickPoint(x: touch.x, y: touch.y)
             }
         }
+        if movedFingers.count >= 2 {
+            gestureMoved = true
+        }
+    }
+
+    /// TWO-FINGER CLICK bookkeeping: keep each finger's readings
+    /// from the last ~0.12 s; forget lifted fingers.
+    private func updatePressureHistory(_ fingers: [TouchSample]) {
+        let now = nowProvider()
+        let ids = Set(fingers.map(\.id))
+        pressureHistory = pressureHistory.filter { ids.contains($0.key) }
+        for finger in fingers {
+            var history = pressureHistory[finger.id] ?? []
+            history.append((now, max(0, finger.pressure)))
+            history.removeAll { now - $0.t > 0.12 }
+            pressureHistory[finger.id] = history
+        }
+    }
+
+    /// Whether `touch` is pressing right now (two-finger click
+    /// detection): at least half the threshold, and risen within the
+    /// last ~0.12 s by a quarter of the threshold — and by at least
+    /// 12 units, since contact readings are absolute: scroll and
+    /// resting fingers wobble by up to ~8 units whatever the preset,
+    /// which at the lightest presets is more than a quarter of the
+    /// threshold.
+    private func isCoPressing(_ touch: TouchSample) -> Bool {
+        let pressure = max(0, touch.pressure)
+        guard pressure >= threshold * 0.5, let history = pressureHistory[touch.id],
+              let lowest = history.map(\.p).min() else { return false }
+        return pressure - lowest >= max(threshold * 0.25, 12)
     }
 
     /// Whether a press by the currently handled finger may fire now.

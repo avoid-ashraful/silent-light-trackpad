@@ -107,6 +107,24 @@ light click is completely silent / feel-less.
      trigger — a finger moving ~1.2 mm in a single frame classifies
      the sequence as a gesture immediately, without waiting for
      the ~2 mm anchor travel to accumulate.
+   - Scenario-suite round (bugs found by the gesture scenario tests
+     and fuzzing in `Tests/LightClickCoreTests/Scenarios`):
+     two-finger click — real fingers land light and press together,
+     so one was already tracked before either reached half the
+     threshold and the lock was never reached: the tracked finger
+     fired a LEFT click on top of macOS's secondary click. Now, while
+     no click is held, two fingers pressing at the same moment (each
+     ≥ half the threshold and risen by ≥ a quarter of it, 12 units
+     at least, within ~0.12 s) lock until every finger lifts; a
+     resting thumb holds steady, so it never counts. Resting thumb
+     vs. the scroll gate — one finger moving beside a still thumb
+     classified the sequence as a scroll, killing every light click
+     until the thumb lifted (pointing then clicking is the main thing
+     that posture is for). A scroll/gesture now needs TWO moving
+     fingers; once every finger that moved has lifted, the still
+     ones left are resting and the classification clears; and the
+     gate forgets lifted touches' positions, so a reused touch ID is
+     no longer misread as a flick.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

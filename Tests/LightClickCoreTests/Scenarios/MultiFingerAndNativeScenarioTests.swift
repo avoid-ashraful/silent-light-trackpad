@@ -341,17 +341,8 @@ struct RestingThumbScenarioTests {
         performer.press(Press(finger: 1, x: 0.57, landing: 12, peak: threshold * 1.4), with: [thumb])
         performer.lift()
         #expect(performer.leakedNativePresses == 0)
-        withKnownIssue("BUG: a resting thumb + index pointing trips the scroll gate; light clicks die until the thumb lifts") {
-            #expect(performer.clicks.count == 1, "\(performer.report())")
-            // At 80 the press (112) also fires macOS's own click: its
-            // down is swallowed (gesture) but its up leaks unpaired.
-            if threshold * 1.4 >= performer.nativeThreshold {
-                #expect(performer.violations().isEmpty, "\(performer.report())")
-            }
-        }
-        if threshold * 1.4 < performer.nativeThreshold {
-            #expect(performer.violations().isEmpty, "\(performer.report())")
-        }
+        #expect(performer.clicks.count == 1, "\(performer.report())")
+        #expect(performer.violations().isEmpty, "\(performer.report())")
     }
 
     /// Thumb resting: drag something with the index, lift the index,
@@ -367,9 +358,7 @@ struct RestingThumbScenarioTests {
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
         #expect(performer.clicks.first?.isDrag == true, "\(performer.report())")
-        withKnownIssue("BUG: the drag's travel leaves the scroll gate set while the thumb rests; the next light click is dropped") {
-            #expect(performer.clicks.count == 2, "\(performer.report())")
-        }
+        #expect(performer.clicks.count == 2, "\(performer.report())")
     }
 }
 
@@ -402,13 +391,10 @@ struct TwoFingerClickScenarioTests {
         #expect(performer.violations().isEmpty, "\(performer.report())")
         #expect(performer.clicks.isEmpty, "\(performer.report())")
         #expect(!performer.engine.isLocked)
-        // Fingers land light and ramp together, so tracking latches
-        // onto one finger before either reaches 50 %: the lock (only
-        // checked while nobody is tracked) never engages; tracking
-        // ping-pongs between the two pressers instead.
-        withKnownIssue("BUG: a real two-finger click (both land light, ramp together) never engages the two-finger lock") {
-            #expect(lockedDuring && lockedAfter)
-        }
+        // Fingers land light and ramp together, so one is already
+        // tracked before either reaches 50 %: the lock must still
+        // engage, from the two fingers pressing at the same moment.
+        #expect(lockedDuring && lockedAfter)
     }
 
     /// Real fingers land a frame or three apart, ramping together.
@@ -418,13 +404,7 @@ struct TwoFingerClickScenarioTests {
         performer.perform(.twoFingerClick(peak: threshold * 1.6, offsetFrames: offset))
         #expect(performer.violations().isEmpty, "\(performer.report())")
         let clicks = performer.clicks
-        if offset >= 3 {
-            withKnownIssue("BUG: a two-finger click whose 2nd finger lands 3 frames late fires a left click before locking") {
-                #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
-            }
-        } else {
-            #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
-        }
+        #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
     }
 
     /// One finger of the pair presses lighter than the other (the
@@ -441,16 +421,10 @@ struct TwoFingerClickScenarioTests {
         }
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
-        if peak * ratio < threshold {
-            // The lighter finger (≥ 50 % but < 100 % of the
-            // threshold) is never a "presser", so the tracked finger
-            // fires after the 3-frame dwell as if the other rested.
-            withKnownIssue("BUG: two-finger click with the 2nd finger at 50–99 % of threshold fires a left click") {
-                #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-            }
-        } else {
-            #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-        }
+        // Even when the lighter finger never reaches the threshold
+        // itself, it climbs with the other one: a two-finger click,
+        // not a press beside a resting finger.
+        #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
     }
 
     /// Context menu, then the user picks an item with an ordinary
@@ -487,9 +461,7 @@ struct TwoFingerClickScenarioTests {
         }
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
-        withKnownIssue("BUG: the finger left behind after a two-finger click fires a left click (no lock was engaged)") {
-            #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-        }
+        #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
     }
 
     /// A long secondary-click hold with pressure wobble on both

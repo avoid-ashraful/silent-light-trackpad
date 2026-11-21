@@ -332,10 +332,8 @@ struct SingleClickScenarioTests {
         p.lift()
 
         #expect(p.violations().isEmpty, "\(p.report())")
-        withKnownIssue("BUG: after pointing with the index while a thumb rests, the gesture gate treats it as a scroll and drops light clicks until every finger lifts") {
-            #expect(p.clicks.count == 1, "\(p.report())")
-            #expect(near(p.clicks.first?.downPoint, ClickPoint(x: 600, y: 500)))
-        }
+        #expect(p.clicks.count == 1, "\(p.report())")
+        #expect(near(p.clicks.first?.downPoint, ClickPoint(x: 600, y: 500)))
     }
 
     /// A quick firm tap where macOS's native press reaches the event
