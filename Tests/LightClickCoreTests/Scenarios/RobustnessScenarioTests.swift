@@ -248,8 +248,7 @@ final class RecordingHand {
 
     func restingFingerClick(rest restPressure: Double, _ p: Press) {
         let rest = Contact(id: 9, x: 0.4, y: 0.85, pressure: restPressure, major: 13)
-        frame([rest])
-        frame([rest])
+        for _ in 0 ..< 38 { frame([rest]) } // a resting finger has been resting
         for pressure in p.curve {
             frame([rest, Contact(id: p.finger, x: p.x, y: p.y, pressure: pressure, major: p.major)], pointer: p.finger)
         }
@@ -801,6 +800,7 @@ struct RobustGlitchTests {
         let rig = TestRig()
         let p = Performer(rig: rig)
         let thumb = Robust.finger(9, 12, x: 0.4, y: 0.85, major: 13)
+        for _ in 0 ..< 38 { p.frame([thumb]) } // the thumb was already resting
         for pressure in [8.0, 40, 70, 70, 70, 70] {
             p.frame([thumb, Robust.finger(1, pressure)], pointer: 1)
         }
@@ -837,7 +837,7 @@ struct RobustGlitchTests {
         let rig = TestRig()
         let p = Performer(rig: rig)
         let thumb = Robust.finger(9, 12, x: 0.4, y: 0.85, major: 13)
-        p.frame([thumb])
+        for _ in 0 ..< 38 { p.frame([thumb]) } // the thumb was already resting
         for pressure in Press.light().curve { p.frame([thumb, Robust.finger(1, pressure, x: 0.5)], pointer: 1) }
         for _ in 0 ..< 6 { p.frame([thumb]) }
         for pressure in Press.light().curve {
@@ -983,9 +983,9 @@ struct RobustGlitchTests {
         #expect(plain.clicks.isEmpty, "\(plain.report())")
         let doubled = run(duplicate: true)
         #expect(doubled.violations().isEmpty, "\(doubled.report())")
-        withKnownIssue("BUG (low): the multi-touch dwell counts frames, so duplicate frames (or a faster pad) shorten it") {
-            #expect(doubled.clicks.isEmpty, "\(doubled.report())")
-        }
+        // The dwell still counts frames, but fingers that land together
+        // and press within 0.3 s are a multi-finger tap — never a click.
+        #expect(doubled.clicks.isEmpty, "\(doubled.report())")
     }
 }
 
@@ -1052,6 +1052,7 @@ struct RobustLongSessionTests {
         let rig = TestRig()
         let p = Performer(rig: rig)
         let thumb = Robust.finger(9, 12, x: 0.4, y: 0.85, major: 13)
+        for _ in 0 ..< 38 { p.frame([thumb]) } // the thumb was already resting
         for _ in 0 ..< 30 {
             for pressure in Press.light().curve { p.frame([thumb, Robust.finger(1, pressure)], pointer: 1) }
             while rig.clock.time.truncatingRemainder(dividingBy: 1) > 0.01 { p.frame([thumb]) }

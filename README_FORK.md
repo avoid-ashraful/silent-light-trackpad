@@ -125,6 +125,18 @@ light click is completely silent / feel-less.
      ones left are resting and the classification clears; and the
      gate forgets lifted touches' positions, so a reused touch ID is
      no longer misread as a flick.
+   - On-device feedback round: two/three-finger taps vibrated (one
+     firm finger of the tap fired a left click) — fingers that touch
+     down within 0.1 s of each other and press within 0.3 s of
+     landing are now a multi-finger tap: no left click, no haptic,
+     locked until every finger lifts. A light click beside a resting
+     finger is SILENT (no haptic), as a macOS tap is; physical-strength
+     clicks (a jab that trips macOS's own click, the hard-press
+     override) still pulse. Double-tap hold: "tap, tap, keep resting
+     and slide" selects word by word — a double (or later) click
+     whose finger stays on the glass stays held: sliding makes it a
+     latched drag released at lift, lifting releases it, pressing
+     again re-clicks (triple), resting still for 0.8 s lets it go.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

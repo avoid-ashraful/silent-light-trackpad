@@ -291,6 +291,10 @@ extension Performer {
 
     // MARK: Building blocks (usable directly from scenario tests)
 
+    /// Frames a resting finger spends on the glass before another
+    /// finger lands: ~0.3 s.
+    var restFrames: Int { Int((0.3 / frameDT).rounded()) }
+
     /// One finger presses following `p.curve`, then lifts.
     func press(_ p: Press, lift doLift: Bool = true) {
         var nativeFired = false
@@ -343,7 +347,9 @@ extension Performer {
     func thumbHoldIndexDrag(thumbPeak: Double, dx: Double, frames: Int) {
         let index = Contact(id: 1, x: 0.5, y: 0.45, pressure: 12)
         var thumb = Contact(id: 2, x: 0.45, y: 0.85, pressure: 6, major: 13)
-        frame([index], pointer: 1)
+        // The index has been pointing for a while before the thumb
+        // comes down (fingers landing together are a multi-finger tap).
+        for _ in 0 ..< restFrames { frame([index], pointer: 1) }
         // Thumb lands and presses, index resting.
         for i in 0 ... 4 {
             thumb.pressure = 6 + (thumbPeak - 6) * Double(i) / 4
@@ -418,8 +424,9 @@ extension Performer {
 
     func restingFingerClick(restPressure: Double, press p: Press) {
         let rest = Contact(id: 9, x: 0.4, y: 0.85, pressure: restPressure, major: 13)
-        frame([rest], pointer: nil)
-        frame([rest], pointer: nil)
+        // A resting finger has been resting (fingers landing within
+        // 0.1 s of each other are a multi-finger tap, not a rest).
+        for _ in 0 ..< restFrames { frame([rest], pointer: nil) }
         var nativeFired = false
         for pressure in p.curve {
             let jab = p.nativeFirst && !nativeFired && pressure >= nativeThreshold

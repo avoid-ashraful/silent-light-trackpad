@@ -91,6 +91,17 @@ public final class ClickEngine {
     // (engine time, pressure), kept for ~0.12 s, to tell a finger
     // that is pressing right now from one that is merely resting.
     private var pressureHistory: [Int32: [(t: Double, p: Double)]] = [:]
+    // MULTI-FINGER TAP: when each finger currently on the glass first
+    // touched down (engine time).
+    private var touchLandedAt: [Int32: Double] = [:]
+    // The fingers of the frame being processed (palms filtered out).
+    private var currentFingers: [TouchSample] = []
+    // SILENT CLICK: the held press was made while another finger
+    // rested on the glass — it posts no haptic, down or up.
+    private var silentPress = false
+    // DOUBLE-TAP HOLD: when a double (or later) click's press eased
+    // off while its finger stayed on the glass; nil otherwise.
+    private var doubleTapHoldSince: Double?
 
     public init(
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
@@ -126,6 +137,7 @@ public final class ClickEngine {
         let fingers = touches.filter { $0.id == fingerID || $0.majorAxis < 20 }
 
         activeTouchCount = fingers.count
+        currentFingers = fingers
         updatePressureHistory(fingers)
         updateGestureGate(fingers)
 
@@ -322,6 +334,8 @@ public final class ClickEngine {
         activeTouchCount = 0
         movedFingers = []
         pressureHistory = [:]
+        touchLandedAt = [:]
+        currentFingers = []
     }
 
     // MARK: - Gesture gate
@@ -406,13 +420,16 @@ public final class ClickEngine {
         }
     }
 
-    /// TWO-FINGER CLICK bookkeeping: keep each finger's readings
-    /// from the last ~0.12 s; forget lifted fingers.
+    /// TWO-FINGER CLICK / MULTI-FINGER TAP bookkeeping: keep each
+    /// finger's readings from the last ~0.12 s and when it landed;
+    /// forget lifted fingers.
     private func updatePressureHistory(_ fingers: [TouchSample]) {
         let now = nowProvider()
         let ids = Set(fingers.map(\.id))
         pressureHistory = pressureHistory.filter { ids.contains($0.key) }
+        touchLandedAt = touchLandedAt.filter { ids.contains($0.key) }
         for finger in fingers {
+            if touchLandedAt[finger.id] == nil { touchLandedAt[finger.id] = now }
             var history = pressureHistory[finger.id] ?? []
             history.append((now, max(0, finger.pressure)))
             history.removeAll { now - $0.t > 0.12 }
@@ -432,6 +449,22 @@ public final class ClickEngine {
         guard pressure >= threshold * 0.5, let history = pressureHistory[touch.id],
               let lowest = history.map(\.p).min() else { return false }
         return pressure - lowest >= max(threshold * 0.25, 12)
+    }
+
+    /// MULTI-FINGER TAP: whether `touch` is pressing as part of a
+    /// two- or three-finger tap — another finger touched down within
+    /// 0.1 s of it, and the press comes within 0.3 s of them landing.
+    /// That is macOS's secondary click, look-up and friends, never a
+    /// left click. A thumb that was already resting landed long
+    /// before the finger that presses; fingers set down together and
+    /// left to rest press later than any tap does.
+    private func isMultiFingerTap(_ touch: TouchSample) -> Bool {
+        guard let landed = touchLandedAt[touch.id] else { return false }
+        let now = nowProvider()
+        return currentFingers.contains { other in
+            guard other.id != touch.id, let otherLanded = touchLandedAt[other.id] else { return false }
+            return abs(otherLanded - landed) <= 0.1 && now - max(otherLanded, landed) <= 0.3
+        }
     }
 
     /// Whether a press by the currently handled finger may fire now.
@@ -490,7 +523,27 @@ public final class ClickEngine {
             hardDwellFrames = 0
         }
 
+        // DOUBLE-TAP HOLD, re-press: pressing again while a double
+        // click is held by a resting finger is the next click of the
+        // chain (triple click) — let the held one go first.
+        if buttonDown, doubleTapHoldSince != nil, !dragLatched, pressure >= threshold {
+            releaseButtonIfNeeded()
+        }
+
         if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
+            if !gestureMoved, activeTouchCount >= 2, isMultiFingerTap(touch) {
+                // MULTI-FINGER TAP (from on-device feedback): two or
+                // three fingers that touched down together and one
+                // of them reached the threshold — a two/three-finger
+                // tap or click. macOS never answers that with a left
+                // click (or a vibration); lock until every finger
+                // lifts. (A classified scroll is exempt: there the
+                // only way here is the deliberate hard-press
+                // override.)
+                resetSequence()
+                waitForAllFingersToLift = true
+                return
+            }
             fireButtonDown()
         }
 
@@ -533,7 +586,28 @@ public final class ClickEngine {
         // threshold — near zero — so a pressure dip mid-drag can
         // never let go early.
         if buttonDown, pressure <= (dragLatched ? threshold * 0.1 : threshold * 0.7) {
-            releaseButtonIfNeeded()
+            // DOUBLE-TAP HOLD (from on-device feedback): "tap, tap,
+            // keep the finger resting and slide" selects word by word
+            // on macOS. The second click's press eases off at once —
+            // the finger only rests — so the snappy release used to
+            // let go before the slide began, and the slide just moved
+            // the pointer. So a double (or later) click whose finger
+            // stays on the glass stays held: sliding turns it into a
+            // latched drag (released at lift); lifting releases it;
+            // pressing again re-clicks; resting still for 0.8 s lets
+            // it go.
+            let now = nowProvider()
+            if clickCount >= 2, !dragLatched {
+                if doubleTapHoldSince == nil { doubleTapHoldSince = now }
+                if let since = doubleTapHoldSince, now - since >= 0.8 {
+                    releaseButtonIfNeeded()
+                }
+            } else {
+                releaseButtonIfNeeded()
+            }
+        } else if buttonDown, doubleTapHoldSince != nil, dragLatched {
+            // The held double click started sliding: it is a drag now.
+            doubleTapHoldSince = nil
         }
     }
 
@@ -566,8 +640,19 @@ public final class ClickEngine {
         tapFiredDownAt = fromTap ? nowProvider() : 0
         dragOrigin = location
         dragLatched = false
-        // Synthetic click haptic at the light threshold.
-        output?.pulseHaptic(down: true)
+        doubleTapHoldSince = nil
+        // SILENT CLICK (from on-device feedback): with another finger
+        // resting on the glass, macOS answers a light tap with a
+        // click but no vibration — so a light press made beside a
+        // resting finger clicks silently. Physical-strength clicks
+        // still pulse, as a real Mac's do: a jab that tripped macOS's
+        // own click (the native path) and the hard-press override
+        // mid-gesture. Alone on the glass, the synthetic click haptic
+        // plays at the light threshold.
+        silentPress = !fromTap && !gestureMoved && activeTouchCount >= 2
+        if !silentPress {
+            output?.pulseHaptic(down: true)
+        }
     }
 
     private func releaseButtonIfNeeded() {
@@ -577,8 +662,13 @@ public final class ClickEngine {
             clickState: max(clickCount, 1),
             eventNumber: activeEventNumber
         )
-        // Release-phase haptic, mirroring a real click's up-stroke.
-        output?.pulseHaptic(down: false)
+        // Release-phase haptic, mirroring a real click's up-stroke
+        // (none for a silent click).
+        if !silentPress {
+            output?.pulseHaptic(down: false)
+        }
+        silentPress = false
+        doubleTapHoldSince = nil
         buttonDown = false
         tapFiredDownAt = 0
         dragLatched = false

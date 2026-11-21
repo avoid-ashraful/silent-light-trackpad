@@ -6,7 +6,11 @@ import XCTest
 /// presser) and ignores fingers that merely rest on the glass.
 /// With two or more fingers down, a press fires only on the 3rd
 /// consecutive frame at/above threshold (the dwell rule); a
-/// single-finger press fires on the 1st frame.
+/// single-finger press fires on the 1st frame. A resting finger has
+/// been on the glass a while (fingers landing within 0.1 s of each
+/// other are a multi-finger tap, never a left click — see
+/// MultiFingerTapTests), and a press beside it is a SILENT click:
+/// no haptic, like a macOS tap with a thumb resting.
 @MainActor
 final class RestingFingerTests: EngineTestCase {
 
@@ -18,16 +22,18 @@ final class RestingFingerTests: EngineTestCase {
         let thumb = rig.touch(1, 8)
         let finger = rig.touch(2, 60)
 
+        rig.frame(thumb) // the thumb was already resting
+        rig.advance(0.3)
         rig.frame(thumb, finger)
         XCTAssertEqual(rig.log, [])
         rig.frame(thumb, finger)
         XCTAssertEqual(rig.log, [])
         rig.frame(thumb, finger)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"]) // silent: a finger rests
         XCTAssertTrue(rig.engine.buttonDown)
 
         rig.liftAll()
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown", "up(1)", "hapticUp"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500", "up(1)"])
         XCTAssertFalse(rig.engine.buttonDown)
     }
 
@@ -40,6 +46,7 @@ final class RestingFingerTests: EngineTestCase {
         // Finger 1 lands alone at resting pressure: it is tracked.
         rig.frame(rig.touch(1, 10))
         XCTAssertEqual(rig.log, [])
+        rig.advance(0.3) // the thumb settles a moment later
 
         let finger = rig.touch(1, 60)
         let thumb = rig.touch(2, 8)
@@ -48,7 +55,7 @@ final class RestingFingerTests: EngineTestCase {
         rig.frame(finger, thumb)
         XCTAssertEqual(rig.log, [])
         rig.frame(finger, thumb)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"])
     }
 
     /// A resting finger landing during a held click never disturbs
@@ -67,7 +74,7 @@ final class RestingFingerTests: EngineTestCase {
         }
 
         rig.liftAll()
-        XCTAssertEqual(rig.log, ["up(1)", "hapticUp"])
+        XCTAssertEqual(rig.log, ["up(1)", "hapticUp"]) // pressed alone: not silent
     }
 
     /// The pressing finger lifts while the thumb keeps resting: the
@@ -80,21 +87,24 @@ final class RestingFingerTests: EngineTestCase {
         let thumb = rig.touch(1, 8)
         let finger = rig.touch(2, 60)
 
+        rig.frame(thumb)
+        rig.advance(0.3)
         rig.frame(thumb, finger)
         rig.frame(thumb, finger)
         rig.frame(thumb, finger)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"])
 
         // Presser lifts, thumb remains: release, no lock.
         rig.frame(thumb)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown", "up(1)", "hapticUp"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500", "up(1)"])
         XCTAssertFalse(rig.engine.buttonDown)
         XCTAssertFalse(rig.engine.isLocked)
 
-        // The thumb presses on its own: single finger, 1st frame.
+        // The thumb presses on its own: single finger, 1st frame,
+        // with the haptic. (No time passes, so the click chains.)
         rig.frame(rig.touch(1, 60))
         XCTAssertEqual(rig.log, [
-            "down(1)@500,500", "hapticDown", "up(1)", "hapticUp",
+            "down(1)@500,500", "up(1)",
             "down(2)@500,500", "hapticDown",
         ])
     }
@@ -126,15 +136,17 @@ final class RestingFingerTests: EngineTestCase {
         let thumb = rig.touch(2, 8)
         let finger = rig.touch(3, 60)
 
+        rig.frame(palm, thumb)
+        rig.advance(0.3)
         rig.frame(palm, thumb, finger)
         XCTAssertEqual(rig.log, [])
         rig.frame(palm, thumb, finger)
         XCTAssertEqual(rig.log, [])
         rig.frame(palm, thumb, finger)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"])
 
         rig.liftAll()
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown", "up(1)", "hapticUp"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500", "up(1)"])
     }
 }
 #endif

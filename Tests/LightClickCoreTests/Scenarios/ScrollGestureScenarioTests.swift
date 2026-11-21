@@ -951,7 +951,7 @@ struct ScrollRestingHandScenarioTests {
     @Test(arguments: thresholds)
     func scrollWithThumbResting(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
-        performer.play([[Self.thumb(9)], [Self.thumb()], [Self.thumb()]], native: .auto, lift: false)
+        performer.play([[Self.thumb(9)]] + Array(repeating: [Self.thumb()], count: 38), native: .auto, lift: false)
         let s = Stroke(start: (0.45, 0.2), travel: (0, 0.3), frames: 24)
         var take = adding(Self.thumb(), to: s.take)
         load(&take, finger: 9, frames: s.moveStart + 6 ..< s.liftStart) { _ in threshold * 1.3 }
@@ -967,7 +967,7 @@ struct ScrollRestingHandScenarioTests {
     @Test(arguments: thresholds)
     func clickAfterScrollWithThumbStillResting(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
-        performer.play([[Self.thumb(9)], [Self.thumb()], [Self.thumb()]], native: .auto, lift: false)
+        performer.play([[Self.thumb(9)]] + Array(repeating: [Self.thumb()], count: 38), native: .auto, lift: false)
         performer.play(adding(Self.thumb(), to: Stroke(start: (0.45, 0.2), travel: (0, 0.3), frames: 24).take), lift: false)
         // Scrolling fingers gone; thumb stays for 80 ms.
         performer.play(Array(repeating: [Self.thumb()], count: 10), native: .auto, lift: false)
@@ -983,7 +983,7 @@ struct ScrollRestingHandScenarioTests {
     @Test(arguments: thresholds)
     func pointWithThumbRestingThenClick(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
-        performer.play([[Self.thumb(9)], [Self.thumb()], [Self.thumb()]], native: .auto, lift: false)
+        performer.play([[Self.thumb(9)]] + Array(repeating: [Self.thumb()], count: 38), native: .auto, lift: false)
         var take: [[Contact]] = []
         for i in 0 ... 20 {
             let t = easeInOut(Double(i) / 20)
