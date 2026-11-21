@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -115,3 +116,4 @@ final class JabTests: EngineTestCase {
         XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown", "up(1)", "hapticUp", "down(2)@500,500", "hapticDown"])
     }
 }
+#endif

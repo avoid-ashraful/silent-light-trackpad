@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -117,3 +118,4 @@ final class RecorderTests: EngineTestCase {
         ])
     }
 }
+#endif

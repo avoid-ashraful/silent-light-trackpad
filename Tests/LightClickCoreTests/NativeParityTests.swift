@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -167,3 +168,4 @@ final class NativeParityTests: EngineTestCase {
         XCTAssertEqual(rig.log, []) // and it stays blocked
     }
 }
+#endif

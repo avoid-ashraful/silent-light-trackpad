@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -61,3 +62,4 @@ final class ThresholdHapticTests: EngineTestCase {
         XCTAssertFalse(heavy.engine.buttonDown)
     }
 }
+#endif

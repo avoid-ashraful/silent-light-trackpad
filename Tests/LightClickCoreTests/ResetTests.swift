@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -65,3 +66,4 @@ final class ResetTests: EngineTestCase {
         XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
     }
 }
+#endif
