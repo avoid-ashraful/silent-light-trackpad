@@ -137,6 +137,15 @@ light click is completely silent / feel-less.
      whose finger stays on the glass stays held: sliding makes it a
      latched drag released at lift, lifting releases it, pressing
      again re-clicks (triple), resting still for 0.8 s lets it go.
+   - Drag deltas: the engine-posted dragged events (see "Drag event
+     numbers") were built from scratch, so they carried zero
+     movement deltas and zero button pressure. Apps that move things
+     by NSEvent.deltaX/deltaY instead of by location — the macOS
+     screenshot selection box could not be moved or resized — saw a
+     drag that never moved. Each dragged event now carries the deltas
+     of the native movement it replaces, and down/dragged events
+     report full button pressure (none on release), like a real
+     button.
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could
