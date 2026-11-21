@@ -132,11 +132,7 @@ light click is completely silent / feel-less.
      locked until every finger lifts. A light click beside a resting
      finger is SILENT (no haptic), as a macOS tap is; physical-strength
      clicks (a jab that trips macOS's own click, the hard-press
-     override) still pulse. Double-tap hold: "tap, tap, keep resting
-     and slide" selects word by word — a double (or later) click
-     whose finger stays on the glass stays held: sliding makes it a
-     latched drag released at lift, lifting releases it, pressing
-     again re-clicks (triple), resting still for 0.8 s lets it go.
+     override) still pulse.
    - Drag deltas: the engine-posted dragged events (see "Drag event
      numbers") were built from scratch, so they carried zero
      movement deltas and zero button pressure. Apps that move things

@@ -99,9 +99,6 @@ public final class ClickEngine {
     // SILENT CLICK: the held press was made while another finger
     // rested on the glass — it posts no haptic, down or up.
     private var silentPress = false
-    // DOUBLE-TAP HOLD: when a double (or later) click's press eased
-    // off while its finger stayed on the glass; nil otherwise.
-    private var doubleTapHoldSince: Double?
 
     public init(
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
@@ -523,13 +520,6 @@ public final class ClickEngine {
             hardDwellFrames = 0
         }
 
-        // DOUBLE-TAP HOLD, re-press: pressing again while a double
-        // click is held by a resting finger is the next click of the
-        // chain (triple click) — let the held one go first.
-        if buttonDown, doubleTapHoldSince != nil, !dragLatched, pressure >= threshold {
-            releaseButtonIfNeeded()
-        }
-
         if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
             if !gestureMoved, activeTouchCount >= 2, isMultiFingerTap(touch) {
                 // MULTI-FINGER TAP (from on-device feedback): two or
@@ -586,28 +576,7 @@ public final class ClickEngine {
         // threshold — near zero — so a pressure dip mid-drag can
         // never let go early.
         if buttonDown, pressure <= (dragLatched ? threshold * 0.1 : threshold * 0.7) {
-            // DOUBLE-TAP HOLD (from on-device feedback): "tap, tap,
-            // keep the finger resting and slide" selects word by word
-            // on macOS. The second click's press eases off at once —
-            // the finger only rests — so the snappy release used to
-            // let go before the slide began, and the slide just moved
-            // the pointer. So a double (or later) click whose finger
-            // stays on the glass stays held: sliding turns it into a
-            // latched drag (released at lift); lifting releases it;
-            // pressing again re-clicks; resting still for 0.8 s lets
-            // it go.
-            let now = nowProvider()
-            if clickCount >= 2, !dragLatched {
-                if doubleTapHoldSince == nil { doubleTapHoldSince = now }
-                if let since = doubleTapHoldSince, now - since >= 0.8 {
-                    releaseButtonIfNeeded()
-                }
-            } else {
-                releaseButtonIfNeeded()
-            }
-        } else if buttonDown, doubleTapHoldSince != nil, dragLatched {
-            // The held double click started sliding: it is a drag now.
-            doubleTapHoldSince = nil
+            releaseButtonIfNeeded()
         }
     }
 
@@ -640,7 +609,6 @@ public final class ClickEngine {
         tapFiredDownAt = fromTap ? nowProvider() : 0
         dragOrigin = location
         dragLatched = false
-        doubleTapHoldSince = nil
         // SILENT CLICK (from on-device feedback): with another finger
         // resting on the glass, macOS answers a light tap with a
         // click but no vibration — so a light press made beside a
@@ -668,7 +636,6 @@ public final class ClickEngine {
             output?.pulseHaptic(down: false)
         }
         silentPress = false
-        doubleTapHoldSince = nil
         buttonDown = false
         tapFiredDownAt = 0
         dragLatched = false

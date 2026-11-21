@@ -4,8 +4,7 @@ import Testing
 // Behaviour asked for after trying the app on the device:
 //  * two/three-finger taps must not click or vibrate;
 //  * a light click beside a resting thumb clicks, silently (like a
-//    macOS tap);
-//  * "tap, tap, keep resting and slide" selects word by word.
+//    macOS tap).
 
 private let thresholds: [Double] = [30, 40, 50, 60, 80]
 
@@ -190,99 +189,5 @@ struct SilentClickTests {
         #expect(p.violations().isEmpty, "\(p.report())")
         #expect(p.clicks.count == 1, "\(p.report())")
         #expect(haptics(p) == 2, "\(p.report())")
-    }
-}
-
-// MARK: - Double-tap hold (select word by word)
-
-@MainActor
-@Suite("On-device feedback: double-tap, rest and slide")
-struct DoubleTapHoldTests {
-    /// First tap of a double-tap: light press, lift.
-    static func firstTap(_ p: Performer, threshold: Double) {
-        p.pressCurve([8, threshold * 0.8, threshold * 1.3, threshold * 1.3, threshold * 0.5, 8], lift: true)
-        p.lift()
-        p.wait(0.1)
-    }
-
-    /// Second tap: light press, then the finger only rests (12).
-    static func secondTapThenRest(_ p: Performer, threshold: Double) {
-        p.pressCurve([8, threshold * 0.8, threshold * 1.3, threshold * 1.3, threshold * 0.5, 12], lift: false)
-    }
-
-    /// Tap, tap, keep the finger resting and slide: the second click
-    /// stays held and the slide drags with click state 2 (word-by-word
-    /// selection); it lets go when the finger lifts.
-    @Test(arguments: thresholds)
-    func tapTapRestAndSlideSelectsByWord(threshold: Double) {
-        let p = Performer(rig: TestRig(threshold: threshold))
-        Self.firstTap(p, threshold: threshold)
-        Self.secondTapThenRest(p, threshold: threshold)
-        p.hold([Contact(id: 1, x: 0.5, y: 0.5, pressure: 12)], frames: 6, pointer: 1)
-        p.slide(finger: 1, from: (0.5, 0.5), by: (0.15, 0), frames: 25, pressure: { _ in 12 })
-        let endOfSlide = p.rig.clock.time
-        p.lift()
-        let clicks = p.clicks
-        #expect(p.violations().isEmpty, "\(p.report())")
-        #expect(clicks.map(\.clickState) == [1, 2], "\(p.report())")
-        #expect(clicks.last?.isDrag == true, "\(p.report())")
-        #expect((clicks.last?.travel ?? 0) > 120, "\(p.report())")
-        #expect((clicks.last?.upAt ?? 0) >= endOfSlide - 1e-9, "released before the finger lifted\n\(p.report())")
-    }
-
-    /// An ordinary double-click (the finger lifts right after the
-    /// second tap) is unchanged: two clicks, nothing dragged.
-    @Test(arguments: thresholds)
-    func ordinaryDoubleClickUnchanged(threshold: Double) {
-        let p = Performer(rig: TestRig(threshold: threshold))
-        Self.firstTap(p, threshold: threshold)
-        Self.secondTapThenRest(p, threshold: threshold)
-        p.lift()
-        #expect(p.violations().isEmpty, "\(p.report())")
-        #expect(p.clicks.map(\.clickState) == [1, 2], "\(p.report())")
-        #expect(p.clicks.allSatisfy { !$0.isDrag })
-    }
-
-    /// Double-tap, then the finger just rests without moving: the
-    /// held click lets go after 0.8 s, never stuck.
-    @Test func restingStillLetsGoAfterAWhile() {
-        let p = Performer(rig: TestRig(threshold: 50))
-        Self.firstTap(p, threshold: 50)
-        Self.secondTapThenRest(p, threshold: 50)
-        let restStart = p.rig.clock.time
-        p.hold([Contact(id: 1, x: 0.5, y: 0.5, pressure: 12)], frames: 150, pointer: 1)
-        #expect(!p.engine.buttonDown, "still held after 1.2 s of resting\n\(p.report())")
-        let up = p.clicks.last?.upAt ?? 0
-        #expect(up - restStart >= 0.7 && up - restStart <= 0.9, "\(p.report())")
-        p.lift()
-        #expect(p.violations().isEmpty, "\(p.report())")
-        #expect(p.clicks.map(\.clickState) == [1, 2])
-    }
-
-    /// Double-tap, rest, then press again without lifting: a triple
-    /// click (select the line).
-    @Test(arguments: thresholds)
-    func tapTapRestPressAgainIsTripleClick(threshold: Double) {
-        let p = Performer(rig: TestRig(threshold: threshold))
-        Self.firstTap(p, threshold: threshold)
-        Self.secondTapThenRest(p, threshold: threshold)
-        p.hold([Contact(id: 1, x: 0.5, y: 0.5, pressure: 12)], frames: 3, pointer: 1)
-        p.pressCurve([threshold * 0.8, threshold * 1.3, threshold * 1.3, threshold * 0.5, 12], lift: true)
-        p.lift()
-        #expect(p.violations().isEmpty, "\(p.report())")
-        #expect(p.clicks.map(\.clickState) == [1, 2, 3], "\(p.report())")
-    }
-
-    /// A SINGLE tap followed by resting and sliding only moves the
-    /// pointer: single clicks keep the snappy release.
-    @Test(arguments: thresholds)
-    func singleTapThenSlideJustPoints(threshold: Double) {
-        let p = Performer(rig: TestRig(threshold: threshold))
-        Self.secondTapThenRest(p, threshold: threshold)
-        p.slide(finger: 1, from: (0.5, 0.5), by: (0.15, 0), frames: 25, pressure: { _ in 12 })
-        p.lift()
-        #expect(p.violations().isEmpty, "\(p.report())")
-        #expect(p.clicks.count == 1, "\(p.report())")
-        #expect(p.clicks.first?.isDrag == false, "\(p.report())")
     }
 }
