@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -99,3 +100,4 @@ final class NativeEventTests: EngineTestCase {
         XCTAssertFalse(rig.engine.buttonDown)
     }
 }
+#endif

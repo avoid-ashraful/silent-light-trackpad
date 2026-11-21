@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -99,3 +100,4 @@ final class DragEventNumberTests: EngineTestCase {
         XCTAssertEqual(rig.numbers, [1, 1, 1])
     }
 }
+#endif

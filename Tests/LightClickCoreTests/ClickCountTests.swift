@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -131,3 +132,4 @@ final class ClickCountTests: EngineTestCase {
         ])
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -30,3 +31,4 @@ final class SmokeTests: EngineTestCase {
         XCTAssertEqual(rig.log, [])
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -127,3 +128,4 @@ final class PressReleaseTests: EngineTestCase {
         XCTAssertEqual(reported, [25, 0])
     }
 }
+#endif

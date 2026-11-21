@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -105,3 +106,4 @@ final class TwoFingerLockTests: EngineTestCase {
         ])
     }
 }
+#endif

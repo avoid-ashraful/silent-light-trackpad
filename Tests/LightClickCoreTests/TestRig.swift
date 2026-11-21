@@ -1,5 +1,8 @@
-import XCTest
+import Foundation
 @testable import LightClickCore
+#if canImport(XCTest)
+import XCTest
+#endif
 
 /// Shared mutable clock + cursor for a rig: the engine's injected
 /// providers read from here, so a test controls time and cursor
@@ -13,28 +16,36 @@ final class RigClock {
 /// `down(1)@500,500`, `drag(1)@520,500`, `up(1)`, `hapticDown`,
 /// `hapticUp`. The event number stamped on each posted mouse
 /// event is recorded in parallel in `numbers`.
+/// `events` keeps the same calls as structured, timestamped values
+/// for the scenario kit's analysis (Scenarios/GestureKit.swift).
 @MainActor
 final class FakeOutput: ClickOutput {
     var log: [String] = []
     var numbers: [Int] = []
+    var events: [OutputEvent] = []
+    var now: () -> Double = { 0 }
 
     func postMouseDown(at point: ClickPoint, clickState: Int, eventNumber: Int) {
         log.append("down(\(clickState))@\(Int(point.x)),\(Int(point.y))")
         numbers.append(eventNumber)
+        events.append(.down(t: now(), at: point, clickState: clickState, number: eventNumber))
     }
 
     func postMouseDragged(at point: ClickPoint, clickState: Int, eventNumber: Int) {
         log.append("drag(\(clickState))@\(Int(point.x)),\(Int(point.y))")
         numbers.append(eventNumber)
+        events.append(.drag(t: now(), at: point, clickState: clickState, number: eventNumber))
     }
 
     func postMouseUp(at point: ClickPoint, clickState: Int, eventNumber: Int) {
         log.append("up(\(clickState))")
         numbers.append(eventNumber)
+        events.append(.up(t: now(), at: point, clickState: clickState, number: eventNumber))
     }
 
     func pulseHaptic(down: Bool) {
         log.append(down ? "hapticDown" : "hapticUp")
+        events.append(.haptic(t: now(), down: down))
     }
 }
 
@@ -46,8 +57,11 @@ final class TestRig {
     let output = FakeOutput()
     let engine: ClickEngine
 
+    let doubleClickInterval: Double
+
     init(threshold: Double = 50, doubleClickInterval: Double = 0.5) {
         let clock = self.clock
+        self.doubleClickInterval = doubleClickInterval
         engine = ClickEngine(
             now: { clock.time },
             cursorLocation: { clock.cursor },
@@ -55,6 +69,7 @@ final class TestRig {
             output: output
         )
         engine.threshold = threshold
+        output.now = { clock.time }
     }
 
     /// Build one touch sample. Defaults: centre of the pad, a
@@ -117,9 +132,11 @@ final class TestRig {
     func clearLog() {
         output.log = []
         output.numbers = []
+        output.events = []
     }
 }
 
+#if canImport(XCTest)
 /// Base class: every engine test runs on the main actor, like the
 /// engine itself.
 @MainActor
@@ -128,3 +145,4 @@ class EngineTestCase: XCTestCase {
         TestRig(threshold: threshold, doubleClickInterval: doubleClickInterval)
     }
 }
+#endif

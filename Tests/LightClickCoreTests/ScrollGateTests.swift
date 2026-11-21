@@ -1,3 +1,4 @@
+#if canImport(XCTest)
 import XCTest
 @testable import LightClickCore
 
@@ -134,3 +135,4 @@ final class ScrollGateTests: EngineTestCase {
         XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"]) // instant, as always
     }
 }
+#endif
