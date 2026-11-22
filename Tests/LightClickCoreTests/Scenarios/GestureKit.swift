@@ -104,14 +104,17 @@ enum Invariants {
         var lastNumber = 0
         var lastTime = -Double.infinity
         var previousDown: (state: Int, at: ClickPoint, t: Double)?
+        var openPulsed = false
 
         for (i, event) in events.enumerated() {
             let here = "event \(i) [\(event)]"
             if event.time < lastTime { problems.append("\(here): time went backwards") }
             lastTime = event.time
 
-            // Haptics are welded to button transitions: one pulse
-            // right after each down / up, never anywhere else.
+            // Haptics are welded to button transitions: at most one
+            // pulse right after each down / up, never anywhere else —
+            // and a press and its release agree: both pulse, or (a
+            // silent click, made beside a resting finger) neither.
             if case let .haptic(_, down) = event {
                 let previous = i > 0 ? events[i - 1] : nil
                 switch (down, previous) {
@@ -121,13 +124,12 @@ enum Invariants {
                 continue
             }
             if case .down = event {
-                if i + 1 >= events.count || events[i + 1] != .haptic(t: event.time, down: true) {
-                    problems.append("\(here): down without its hapticDown")
-                }
+                openPulsed = i + 1 < events.count && events[i + 1] == .haptic(t: event.time, down: true)
             }
-            if case .up = event {
-                if i + 1 >= events.count || events[i + 1] != .haptic(t: event.time, down: false) {
-                    problems.append("\(here): up without its hapticUp")
+            if case .up = event, open != nil {
+                let pulsed = i + 1 < events.count && events[i + 1] == .haptic(t: event.time, down: false)
+                if pulsed != openPulsed {
+                    problems.append("\(here): release \(pulsed ? "pulses" : "is silent") but its press \(openPulsed ? "pulsed" : "was silent")")
                 }
             }
 

@@ -332,10 +332,8 @@ struct SingleClickScenarioTests {
         p.lift()
 
         #expect(p.violations().isEmpty, "\(p.report())")
-        withKnownIssue("BUG: after pointing with the index while a thumb rests, the gesture gate treats it as a scroll and drops light clicks until every finger lifts") {
-            #expect(p.clicks.count == 1, "\(p.report())")
-            #expect(near(p.clicks.first?.downPoint, ClickPoint(x: 600, y: 500)))
-        }
+        #expect(p.clicks.count == 1, "\(p.report())")
+        #expect(near(p.clicks.first?.downPoint, ClickPoint(x: 600, y: 500)))
     }
 
     /// A quick firm tap where macOS's native press reaches the event
@@ -360,20 +358,22 @@ struct SingleClickScenarioTests {
 
     /// Same late native press, but it arrives just after the finger
     /// has left the glass (still within 150 ms of the last frame).
+    /// It used to fire a click of ours that nothing released (stuck
+    /// until the next touch). Nothing on the glass can press, so it
+    /// passes through untouched — down and up — like a tap-to-click.
     @Test func quickFirmTapWithNativePressArrivingAfterLift() {
         let p = makePerformer()
         p.pressures([8, 60, 110, 110, 40, 8], native: .none)
         p.lift()
-        p.note("late native leftMouseDown → \(p.rig.nativeDown() ? "swallowed" : "PASSED THROUGH")")
+        let down = p.rig.nativeDown()
         p.wait(0.01)
-        p.note("late native leftMouseUp → \(p.rig.nativeUp() ? "swallowed" : "PASSED THROUGH")")
+        let up = p.rig.nativeUp()
         p.wait(0.5)
 
-        withKnownIssue("BUG: a native down arriving after lift fires a tap click that nothing releases (stuck button until the next touch)") {
-            #expect(p.violations(settled: true).isEmpty, "\(p.report())")
-            #expect(!p.engine.buttonDown)
-            #expect(p.clicks.count == 1, "\(p.report())")
-        }
+        #expect(!down && !up, "the native press and its release pass through as a pair")
+        #expect(p.violations(settled: true).isEmpty, "\(p.report())")
+        #expect(!p.engine.buttonDown)
+        #expect(p.clicks.count == 1, "\(p.report())")
     }
 }
 

@@ -54,16 +54,15 @@ struct KnownLimitationTests {
 
     /// Loading one finger to the threshold for 3 frames while every
     /// finger is still stationary — at the very start of a scroll or
-    /// swipe — is indistinguishable from pressing with resting
-    /// fingers, and clicks.
+    /// swipe — used to click (indistinguishable from pressing with
+    /// resting fingers). Fixed: fingers that land together and press
+    /// within 0.3 s are a multi-finger tap, never a left click.
     @Test func loadedFingerBeforeAScrollMovesClicks() {
         let performer = Performer(rig: TestRig(threshold: 50))
         // Four fingers settle, one carries 55 for several frames
         // before the hand starts moving.
         performer.perform(.scroll(fingers: 4, dx: 0, dy: -0.03, frames: 29, heavy: 55, landingSpike: false))
         #expect(performer.violations().isEmpty, "\(performer.report())")
-        withKnownIssue("A stationary multi-finger load past the dwell clicks before the gesture is recognised") {
-            #expect(performer.clicks.isEmpty, "\(performer.report())")
-        }
+        #expect(performer.clicks.isEmpty, "\(performer.report())")
     }
 }

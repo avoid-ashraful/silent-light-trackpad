@@ -107,6 +107,60 @@ light click is completely silent / feel-less.
      trigger — a finger moving ~1.2 mm in a single frame classifies
      the sequence as a gesture immediately, without waiting for
      the ~2 mm anchor travel to accumulate.
+   - Scenario-suite round (bugs found by the gesture scenario tests
+     and fuzzing in `Tests/LightClickCoreTests/Scenarios`):
+     two-finger click — real fingers land light and press together,
+     so one was already tracked before either reached half the
+     threshold and the lock was never reached: the tracked finger
+     fired a LEFT click on top of macOS's secondary click. Now, while
+     no click is held, two fingers pressing at the same moment (each
+     ≥ half the threshold and risen by ≥ a quarter of it, 12 units
+     at least, within ~0.12 s) lock until every finger lifts; a
+     resting thumb holds steady, so it never counts. Resting thumb
+     vs. the scroll gate — one finger moving beside a still thumb
+     classified the sequence as a scroll, killing every light click
+     until the thumb lifted (pointing then clicking is the main thing
+     that posture is for). A scroll/gesture now needs TWO moving
+     fingers; once every finger that moved has lifted, the still
+     ones left are resting and the classification clears; and the
+     gate forgets lifted touches' positions, so a reused touch ID is
+     no longer misread as a flick.
+   - On-device feedback round: two/three-finger taps vibrated (one
+     firm finger of the tap fired a left click) — fingers that touch
+     down within 0.1 s of each other and press within 0.3 s of
+     landing are now a multi-finger tap: no left click, no haptic,
+     locked until every finger lifts. A light click beside a resting
+     finger is SILENT (no haptic), as a macOS tap is; physical-strength
+     clicks (a jab that trips macOS's own click, the hard-press
+     override) still pulse.
+   - Drag deltas: the engine-posted dragged events (see "Drag event
+     numbers") were built from scratch, so they carried zero
+     movement deltas and zero button pressure. Apps that move things
+     by NSEvent.deltaX/deltaY instead of by location — the macOS
+     screenshot selection box could not be moved or resized — saw a
+     drag that never moved. Each dragged event now carries the deltas
+     of the native movement it replaces, and down/dragged events
+     report full button pressure (none on release), like a real
+     button.
+   - Tap to click (from a device recording): the app writes Tap to
+     click off on start, but that preference only reaches the trackpad
+     driver at the next login, so taps kept making macOS post its own
+     clicks. The fast-jab path took every such click for a hard jab:
+     it swallowed it and posted a click of its own with a vibration;
+     when the click came after the finger had lifted it stayed held
+     until the next touch (a double tap held a selection, then
+     vibrated on the next touch), and macOS's tap-and-drag was cut
+     short. The engine now remembers the last tap (≤ 0.35 s, stayed
+     put, not part of a gesture) and lets a native press through
+     untouched when it is that tap's click: within 0.5 s of the tap,
+     with nothing on the glass, as a new finger lands, or with only
+     fingers that were already resting. A native press with nothing on
+     the glass always passes (it can't be a jab). If our own click
+     already answered the tap, macOS's duplicate is swallowed. While a
+     passed-through press is held, the pressure path posts no down of
+     its own. Fixture: `Tests/LightClickCoreTests/Fixtures/
+     tap-to-click-session.jsonl` (50 s of the recording; replays with
+     no output).
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

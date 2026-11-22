@@ -40,15 +40,19 @@ final class ScrollGateTests: EngineTestCase {
 
     func testDeliberatePressWithRestingFingerFiresOnThirdFrame() {
         let rig = makeRig()
+        rig.frame(rig.touch(1, 10)) // the resting finger was there first
+        rig.advance(0.3)
         rig.frame(rig.touch(1, 10), rig.touch(2, 60))
         rig.frame(rig.touch(1, 10), rig.touch(2, 60))
         XCTAssertEqual(rig.log, []) // dwell: not yet
         rig.frame(rig.touch(1, 10), rig.touch(2, 60))
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"]) // silent beside a resting finger
     }
 
     func testDwellMustBeConsecutive() {
         let rig = makeRig()
+        rig.frame(rig.touch(1, 10)) // the resting finger was there first
+        rig.advance(0.3)
         rig.frame(rig.touch(1, 10), rig.touch(2, 60)) // dwell 1
         rig.frame(rig.touch(1, 10), rig.touch(2, 60)) // dwell 2
         rig.frame(rig.touch(1, 10), rig.touch(2, 20)) // dip → dwell resets
@@ -56,7 +60,7 @@ final class ScrollGateTests: EngineTestCase {
         rig.frame(rig.touch(1, 10), rig.touch(2, 60)) // dwell 2
         XCTAssertEqual(rig.log, [])
         rig.frame(rig.touch(1, 10), rig.touch(2, 60)) // dwell 3 → fire
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"])
     }
 
     func testClassificationSticksWhenOneFingerLifts() {
@@ -113,13 +117,15 @@ final class ScrollGateTests: EngineTestCase {
         // (0.005/frame: below the velocity trigger, and total travel
         // stays below the ~2 mm anchor distance) is a press, not a
         // scroll — the dwell rule lets it fire on frame 3.
+        rig.frame(rig.touch(2, 20, x: 0.60, y: 0.55)) // resting finger first
+        rig.advance(0.3)
         var x = 0.40
         for _ in 0 ..< 3 {
             rig.frame(rig.touch(1, 60, x: x, y: 0.50), rig.touch(2, 20, x: 0.60, y: 0.55))
             x += 0.005
         }
         XCTAssertFalse(rig.engine.gestureMoved)
-        XCTAssertEqual(rig.log, ["down(1)@500,500", "hapticDown"])
+        XCTAssertEqual(rig.log, ["down(1)@500,500"])
     }
 
     func testSingleFingerFastMovementNeverClassifies() {

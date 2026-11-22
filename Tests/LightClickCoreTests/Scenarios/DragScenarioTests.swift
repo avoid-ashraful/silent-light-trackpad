@@ -783,6 +783,7 @@ struct DragScenarioTests {
         let performer = Performer(rig: TestRig(threshold: 50))
         let hand = Hand(performer, x: 0.4, y: 0.4)
         hand.others = [Contact(id: 9, x: 0.35, y: 0.88, pressure: 12, major: 13)]
+        for _ in 0 ..< 38 { performer.frame(hand.others, pointer: nil) } // already resting
         hand.touchDown(pressure: 8)
         hand.press(to: 75)
         hand.hold(frames: 5)
@@ -802,7 +803,7 @@ struct DragScenarioTests {
         let hand = Hand(performer, x: 0.4, y: 0.4)
         hand.others = [Contact(id: 9, x: 0.35, y: 0.88, pressure: 12, major: 13)]
         let peak = Self.peak(threshold)
-        performer.frame(hand.others, pointer: nil)
+        for _ in 0 ..< 38 { performer.frame(hand.others, pointer: nil) } // already resting
         hand.touchDown(pressure: 8)
         hand.press(to: peak)
         hand.hold(frames: 5)
@@ -912,7 +913,7 @@ struct DragScenarioTests {
         let peak = Self.peak(threshold)
         var index = Contact(id: 1, x: 0.4, y: 0.4, pressure: 12)
         var thumb = Contact(id: 2, x: 0.45, y: 0.88, pressure: 6, major: 13)
-        performer.frame([index], pointer: 1)
+        for _ in 0 ..< 38 { performer.frame([index], pointer: 1) } // index was pointing
         performer.frame([index, thumb], pointer: 1)
         for i in 1 ... 4 {
             thumb.pressure = 6 + (peak - 6) * Double(i) / 4
@@ -942,7 +943,7 @@ struct DragScenarioTests {
         let performer = Performer(rig: TestRig(threshold: 50))
         var index = Contact(id: 1, x: 0.3, y: 0.4, pressure: 12)
         var thumb = Contact(id: 2, x: 0.45, y: 0.88, pressure: 6, major: 13)
-        performer.frame([index], pointer: 1)
+        for _ in 0 ..< 38 { performer.frame([index], pointer: 1) } // index was pointing
         for i in 1 ... 4 {
             thumb.pressure = 6 + 70 * Double(i) / 4
             performer.frame([index, thumb], pointer: 1)
@@ -1017,7 +1018,7 @@ struct DragScenarioTests {
         let performer = Performer(rig: TestRig(threshold: 50))
         let hand = Hand(performer, x: 0.5, y: 0.4)
         hand.others = [Contact(id: 20, x: 0.1, y: 0.9, pressure: 70, major: 28)]
-        performer.frame(hand.others, pointer: nil)
+        for _ in 0 ..< 38 { performer.frame(hand.others, pointer: nil) } // already resting
         hand.touchDown()
         hand.press(to: 70)
         hand.hold(frames: 3)
@@ -1036,7 +1037,7 @@ struct DragScenarioTests {
         let performer = Performer(rig: TestRig(threshold: 50))
         let hand = Hand(performer, x: 0.4, y: 0.4)
         hand.others = [Contact(id: 9, x: 0.35, y: 0.88, pressure: 14, major: 13)]
-        performer.frame(hand.others, pointer: nil)
+        for _ in 0 ..< 38 { performer.frame(hand.others, pointer: nil) } // already resting
         hand.touchDown(pressure: 8)
         hand.press(to: 150, frames: 1, jab: true)
         hand.hold(frames: 2)
@@ -1074,7 +1075,7 @@ struct DragScenarioTests {
         let performer = Performer(rig: TestRig(threshold: 50))
         let hand = Hand(performer, x: 0.6, y: 0.4)
         hand.others = [Contact(id: 9, x: 0.35, y: 0.88, pressure: 12, major: 13)]
-        performer.frame(hand.others, pointer: nil)
+        for _ in 0 ..< 38 { performer.frame(hand.others, pointer: nil) } // already resting
         hand.touchDown(pressure: 8)
         hand.press(to: 70)
         hand.hold(frames: 4)

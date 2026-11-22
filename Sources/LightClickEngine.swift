@@ -180,7 +180,22 @@ final class LightClickEngine {
             // the hardware event number and broke drags in
             // Chromium browsers and Mission Control.) With no
             // button held the event passes untouched.
-            if core.handleNativeMouseMove(at: ClickPoint(x: Double(location.x), y: Double(location.y))) {
+            //
+            // DRAG DELTAS: hand the native movement's deltas to the
+            // dragged event the core may post in its place. A
+            // software-built mouse event carries zero deltas, and
+            // apps that move things by NSEvent.deltaX/deltaY rather
+            // than by location — the screenshot selection box, for
+            // one — saw a drag that never moved.
+            systemOutput.pendingDragDelta = (
+                event.getDoubleValueField(.mouseEventDeltaX),
+                event.getDoubleValueField(.mouseEventDeltaY)
+            )
+            defer { systemOutput.pendingDragDelta = nil }
+            if core.handleNativeMouseMove(
+                at: ClickPoint(x: Double(location.x), y: Double(location.y)),
+                dragging: type == .leftMouseDragged
+            ) {
                 return nil
             }
         }
@@ -211,6 +226,9 @@ final class LightClickEngine {
 @MainActor
 private final class SystemClickOutput: ClickOutput {
     private let record: (RecordedEvent) -> Void
+    /// The deltas of the native movement being answered, set by the
+    /// event tap around the core's move handling (see DRAG DELTAS).
+    var pendingDragDelta: (x: Double, y: Double)?
 
     init(record: @escaping (RecordedEvent) -> Void) {
         self.record = record
@@ -222,7 +240,7 @@ private final class SystemClickOutput: ClickOutput {
     }
 
     func postMouseDragged(at point: ClickPoint, clickState: Int, eventNumber: Int) {
-        post(type: .leftMouseDragged, at: point, clickState: clickState, eventNumber: eventNumber)
+        post(type: .leftMouseDragged, at: point, clickState: clickState, eventNumber: eventNumber, delta: pendingDragDelta)
         record(.outputDragged(time: CACurrentMediaTime(), x: point.x, y: point.y, clickState: clickState))
     }
 
@@ -236,7 +254,13 @@ private final class SystemClickOutput: ClickOutput {
         record(.outputHaptic(time: CACurrentMediaTime(), down: down))
     }
 
-    private func post(type: CGEventType, at point: ClickPoint, clickState: Int, eventNumber: Int) {
+    private func post(
+        type: CGEventType,
+        at point: ClickPoint,
+        clickState: Int,
+        eventNumber: Int,
+        delta: (x: Double, y: Double)? = nil
+    ) {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(
             mouseEventSource: source,
@@ -253,6 +277,20 @@ private final class SystemClickOutput: ClickOutput {
         // requirement), and stream-driven drags — browser tabs,
         // Mission Control windows — never start.
         event.setIntegerValueField(.mouseEventNumber, value: Int64(eventNumber))
+        // DRAG DELTAS (see the event tap): the dragged event carries
+        // the movement it replaces, so apps that track drags by
+        // delta move with it.
+        if let delta {
+            event.setDoubleValueField(.mouseEventDeltaX, value: delta.x)
+            event.setDoubleValueField(.mouseEventDeltaY, value: delta.y)
+            event.setIntegerValueField(.mouseEventDeltaX, value: Int64(delta.x.rounded()))
+            event.setIntegerValueField(.mouseEventDeltaY, value: Int64(delta.y.rounded()))
+        }
+        // BUTTON PRESSURE: a real button reports full pressure while
+        // it is down (down and dragged) and none on release; a
+        // software-built event leaves it at zero, which some
+        // pressure-aware views read as "not pressed".
+        event.setDoubleValueField(.mouseEventPressure, value: type == .leftMouseUp ? 0 : 1)
         // MODIFIER KEYS (fork fix, from the native-behaviour audit): a
         // real click carries the modifiers held at that moment —
         // Cmd+click opens a link in a new tab, Ctrl+click acts as a

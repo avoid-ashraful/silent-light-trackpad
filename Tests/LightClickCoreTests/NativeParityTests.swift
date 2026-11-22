@@ -156,15 +156,17 @@ final class NativeParityTests: EngineTestCase {
         XCTAssertEqual(rig.log, [])
         XCTAssertFalse(rig.engine.gestureMoved)
 
-        // One fast step: 0.013 in a single frame. Total travel is
-        // still under the ~2 mm anchor distance, so only the
-        // velocity trigger can classify this — and it must, or the
-        // dwell rule would fire the click on this very frame.
-        rig.frame(rig.touch(1, 60, x: 0.513, y: 0.50), rig.touch(2, 20, x: 0.700, y: 0.55))
+        // One fast step of both fingers: 0.013 in a single frame.
+        // Total travel is still under the ~2 mm anchor distance, so
+        // only the velocity trigger can classify this — and it must,
+        // or the dwell rule would fire the click on this very frame.
+        // (Both fingers move: one finger moving beside a still one is
+        // pointing with a resting thumb, not a gesture.)
+        rig.frame(rig.touch(1, 60, x: 0.513, y: 0.50), rig.touch(2, 20, x: 0.713, y: 0.55))
         XCTAssertTrue(rig.engine.gestureMoved)
         XCTAssertEqual(rig.log, [])
 
-        rig.frame(rig.touch(1, 60, x: 0.526, y: 0.50), rig.touch(2, 20, x: 0.700, y: 0.55))
+        rig.frame(rig.touch(1, 60, x: 0.526, y: 0.50), rig.touch(2, 20, x: 0.726, y: 0.55))
         XCTAssertEqual(rig.log, []) // and it stays blocked
     }
 }

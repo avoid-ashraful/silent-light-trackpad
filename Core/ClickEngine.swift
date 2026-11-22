@@ -82,6 +82,46 @@ public final class ClickEngine {
     private var dwellFrames = 0
     private var hardDwellFingerID: Int32?
     private var hardDwellFrames = 0
+    // SCROLL/GESTURE GATE: fingers that have travelled in the
+    // current multi-touch sequence. Only two or more moving fingers
+    // make a scroll/gesture; one finger moving while the others stay
+    // put is pointing with a resting thumb (see updateGestureGate).
+    private var movedFingers: Set<Int32> = []
+    // TWO-FINGER CLICK: each finger's recent pressure readings
+    // (engine time, pressure), kept for ~0.12 s, to tell a finger
+    // that is pressing right now from one that is merely resting.
+    private var pressureHistory: [Int32: [(t: Double, p: Double)]] = [:]
+    // MULTI-FINGER TAP: when each finger currently on the glass first
+    // touched down (engine time).
+    private var touchLandedAt: [Int32: Double] = [:]
+    // The fingers of the frame being processed (palms filtered out).
+    private var currentFingers: [TouchSample] = []
+    // SILENT CLICK: the held press was made while another finger
+    // rested on the glass — it posts no haptic, down or up.
+    private var silentPress = false
+    // TAP TO CLICK (from a device recording): with macOS's Tap to
+    // click live, a light tap makes the system post its own
+    // left-mouse-down/up — a little after the finger lifts, or as the
+    // next finger lands when it waits to see a double tap. The
+    // fast-jab path took those for hard jabs: it swallowed them and
+    // posted its own click, with a vibration, and when the click came
+    // after the finger had left it stayed held until the next touch
+    // (a double tap held a selection, then vibrated on the next
+    // touch). So the engine remembers the last tap — a touch of at
+    // most 0.35 s that stayed put, outside any scroll/gesture or
+    // multi-finger lock — and whether that touch fired our click.
+    private var touchClicked: Set<Int32> = []
+    private var touchLandedPos: [Int32: ClickPoint] = [:]
+    private var touchLastPos: [Int32: ClickPoint] = [:]
+    private var lastTapEndedAt = -Double.infinity
+    private var lastTapClicked = false
+    // A tap-to-click press we let through to apps is held (by macOS)
+    // until its up arrives; while it is, the pressure path must not
+    // post a second down on top of it. Refreshed by native drags
+    // (tap-and-drag); expires 0.5 s after the last of them in case
+    // the up never reaches the tap.
+    private var nativeHeld = false
+    private var nativeHeldAt: Double = 0
 
     public init(
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
@@ -117,6 +157,8 @@ public final class ClickEngine {
         let fingers = touches.filter { $0.id == fingerID || $0.majorAxis < 20 }
 
         activeTouchCount = fingers.count
+        currentFingers = fingers
+        updatePressureHistory(fingers)
         updateGestureGate(fingers)
 
         if !fingers.isEmpty {
@@ -130,6 +172,25 @@ public final class ClickEngine {
         }
 
         guard !waitForAllFingersToLift else { return }
+
+        // TWO-FINGER CLICK (from the scenario suite): real fingers
+        // land light and press together, so by the time either is
+        // over half the threshold one of them is already tracked,
+        // and the "nobody tracked" lock below was never reached —
+        // the tracked finger fired a LEFT click on top of macOS's
+        // own secondary click. So, whenever no click is held: two or
+        // more fingers pressing at the same moment is a two-finger
+        // click — lock until every finger lifts. "Pressing" means
+        // at least half the threshold AND risen by a quarter of the
+        // threshold (12 units at least) within the last ~0.12 s: a
+        // resting thumb holds
+        // steady (even above half the threshold at low presets), a
+        // co-pressing finger climbs.
+        if !buttonDown, fingers.filter({ isCoPressing($0) }).count >= 2 {
+            if fingerID != nil { resetSequence() }
+            waitForAllFingersToLift = true
+            return
+        }
 
         // RESTING-FINGER SUPPORT (from the native-behaviour audit):
         // the original app demanded exactly ONE active touch — with
@@ -216,7 +277,39 @@ public final class ClickEngine {
             // press so one press stays one click.
             return true
         }
-        if nowProvider() - lastTouchActivityTime <= 0.15 {
+        let now = nowProvider()
+        // TAP TO CLICK: a native press arriving within 0.5 s of a tap
+        // ending — with nothing on the glass, or as a new finger
+        // lands, or with only fingers that were already resting — is
+        // macOS's tap click for it, not a jab.
+        if now - lastTapEndedAt <= 0.5, activeTouchCount == 0 || isTapClickMoment(now) {
+            if lastTapClicked, activeTouchCount > 0 {
+                // The tap was a light press we already clicked for,
+                // and the press comes as the next finger lands:
+                // macOS's tap click is a duplicate — swallow it and
+                // its up. (With nothing on the glass it may as well
+                // be a mouse; that passes, as before.)
+                ignoreNativeMouseUpUntil = max(ignoreNativeMouseUpUntil, now + 0.15)
+                return true
+            }
+            if lastTapClicked {
+                holdNative(now)
+                return false
+            }
+            // A tap too light for our click: macOS's own tap click,
+            // silent, with its double tap and tap-and-drag. Let it
+            // through untouched.
+            holdNative(now)
+            return false
+        }
+        if activeTouchCount == 0 {
+            // Nothing on the glass: a press can't come from it (a jab
+            // fires its native press while the finger is down). Tap
+            // to click or another input source — not ours.
+            holdNative(now)
+            return false
+        }
+        if now - lastTouchActivityTime <= 0.15 {
             // FAST-JAB FIX: a fast, hard jab can cross Apple's native
             // threshold before the next pressure frame is processed,
             // so the native click wins the race against the touch
@@ -236,14 +329,44 @@ public final class ClickEngine {
             }
             return true
         }
+        holdNative(now)
         return false
+    }
+
+    /// Whether every finger on the glass either was there before the
+    /// last tap ended (resting) or has only just landed (≤ 60 ms, at
+    /// a touch's resting pressure — taps read 0–20) — when macOS
+    /// posts a pending tap click.
+    /// A finger that landed after the tap and has been pressing for
+    /// longer is a press of its own: its native press is a jab.
+    private func isTapClickMoment(_ now: Double) -> Bool {
+        currentFingers.allSatisfy { finger in
+            guard let landed = touchLandedAt[finger.id] else { return true }
+            return landed < lastTapEndedAt || (now - landed <= 0.06 && max(0, finger.pressure) < 25)
+        }
+    }
+
+    private func holdNative(_ now: Double) {
+        nativeHeld = true
+        nativeHeldAt = now
+    }
+
+    /// Whether a native press we let through is still held by macOS
+    /// (see nativeHeld).
+    private var nativePressHeld: Bool {
+        nativeHeld && nowProvider() - nativeHeldAt <= 0.5
     }
 
     /// A native left-mouse-up reached the event tap. Returns true
     /// when it must be swallowed: it pairs with a held synthetic
     /// click, or it is the native echo of a click we just released.
+    /// The up of a native press we let through always passes too.
     public func handleNativeMouseUp() -> Bool {
-        buttonDown || nowProvider() < ignoreNativeMouseUpUntil
+        if nativeHeld, !buttonDown {
+            nativeHeld = false
+            return false
+        }
+        return buttonDown || nowProvider() < ignoreNativeMouseUpUntil
     }
 
     /// A native mouse-moved or left-mouse-dragged event reached
@@ -261,8 +384,13 @@ public final class ClickEngine {
     /// started, while AppKit drag sessions, which the window
     /// server drives itself once initiated, survived.) With no
     /// button held, returns false and the event passes untouched.
-    public func handleNativeMouseMove(at point: ClickPoint) -> Bool {
-        guard buttonDown else { return false }
+    public func handleNativeMouseMove(at point: ClickPoint, dragging: Bool = false) -> Bool {
+        guard buttonDown else {
+            // A native drag of a press we let through (tap and drag):
+            // macOS still holds its button.
+            if dragging, nativeHeld { nativeHeldAt = nowProvider() }
+            return false
+        }
         output?.postMouseDragged(
             at: point,
             clickState: max(clickCount, 1),
@@ -291,23 +419,41 @@ public final class ClickEngine {
         hardDwellFingerID = nil
         hardDwellFrames = 0
         activeTouchCount = 0
+        movedFingers = []
+        pressureHistory = [:]
+        touchLandedAt = [:]
+        currentFingers = []
+        touchClicked = []
+        touchLandedPos = [:]
+        touchLastPos = [:]
+        lastTapEndedAt = -.infinity
+        lastTapClicked = false
+        nativeHeld = false
     }
 
     // MARK: - Gesture gate
 
     /// SCROLL/GESTURE GATE bookkeeping, run on every frame before
     /// any click logic: anchor each touch when it joins a
-    /// multi-touch sequence, and classify the sequence as a
-    /// scroll/gesture once any finger has travelled ~2 mm from its
-    /// anchor (0.02 in the trackpad's normalised coordinates) or
-    /// moved ~1.2 mm in a single frame — a flick's speed gives it
-    /// away before its travel does. The classification sticks until
-    /// every finger lifts — a finger that keeps gliding after the
-    /// other one leaves is still scrolling, not pressing.
+    /// multi-touch sequence, and mark a finger as moved once it has
+    /// travelled ~2 mm from its anchor (0.02 in the trackpad's
+    /// normalised coordinates) or ~1.2 mm in a single frame — a
+    /// flick's speed gives it away before its travel does. The
+    /// sequence is a scroll/gesture once TWO or more fingers have
+    /// moved: scrolls, swipes, pinches and rotations move every
+    /// finger, while one finger moving with the others still is
+    /// pointing (or dragging) with a resting thumb, which macOS
+    /// treats as ordinary pointing — the original rule (any one
+    /// finger moving) killed every light click after the index
+    /// moved the cursor while a thumb rested, until the thumb
+    /// lifted. The classification sticks until every finger lifts —
+    /// a finger that keeps gliding after the other one leaves is
+    /// still scrolling, not pressing.
     private func updateGestureGate(_ active: [TouchSample]) {
         if active.isEmpty {
             touchAnchors = [:]
             touchLastPositions = [:]
+            movedFingers = []
             gestureMoved = false
             dwellFingerID = nil
             dwellFrames = 0
@@ -315,17 +461,39 @@ public final class ClickEngine {
             hardDwellFrames = 0
             return
         }
-        guard active.count >= 2 else { return }
         let ids = Set(active.map(\.id))
+        movedFingers = movedFingers.intersection(ids)
+        // RESTING FINGERS OUTLAST A GESTURE: once every finger that
+        // moved has lifted, the fingers still down never moved —
+        // a thumb resting through a scroll. The scroll is over; they
+        // must not keep it alive (light clicks stayed dead until the
+        // thumb lifted). A finger that moved and is still down keeps
+        // the classification: it is still gliding.
+        if gestureMoved, movedFingers.isEmpty {
+            gestureMoved = false
+            hardDwellFingerID = nil
+            hardDwellFrames = 0
+        }
+        guard active.count >= 2 else {
+            // A lone finger is never a gesture by itself. Forget the
+            // anchors so the next multi-touch sequence anchors fresh:
+            // a stale position for a lifted (or since-moved) touch
+            // would read as a jump the moment a second finger lands —
+            // and touch IDs are reused (a reused ID's old spot looked
+            // like a flick, killing the click).
+            touchAnchors = [:]
+            touchLastPositions = [:]
+            return
+        }
         touchAnchors = touchAnchors.filter { ids.contains($0.key) }
         touchLastPositions = touchLastPositions.filter { ids.contains($0.key) }
         for touch in active {
-            // VELOCITY TRIGGER: per-frame displacement of any finger.
+            // VELOCITY TRIGGER: per-frame displacement of this finger.
             if let last = touchLastPositions[touch.id] {
                 let vx = touch.x - last.x
                 let vy = touch.y - last.y
                 if vx * vx + vy * vy > 0.000144 {
-                    gestureMoved = true
+                    movedFingers.insert(touch.id)
                 }
             }
             touchLastPositions[touch.id] = ClickPoint(x: touch.x, y: touch.y)
@@ -334,11 +502,79 @@ public final class ClickEngine {
                 let dx = touch.x - anchor.x
                 let dy = touch.y - anchor.y
                 if dx * dx + dy * dy > 0.0004 {
-                    gestureMoved = true
+                    movedFingers.insert(touch.id)
                 }
             } else {
                 touchAnchors[touch.id] = ClickPoint(x: touch.x, y: touch.y)
             }
+        }
+        if movedFingers.count >= 2 {
+            gestureMoved = true
+        }
+    }
+
+    /// TWO-FINGER CLICK / MULTI-FINGER TAP bookkeeping: keep each
+    /// finger's readings from the last ~0.12 s and when it landed;
+    /// forget lifted fingers.
+    private func updatePressureHistory(_ fingers: [TouchSample]) {
+        let now = nowProvider()
+        let ids = Set(fingers.map(\.id))
+        // TAP TO CLICK: a finger that lifts after at most 0.35 s on
+        // the glass was a tap.
+        for (id, landed) in touchLandedAt where !ids.contains(id) {
+            guard now - landed <= 0.35, !gestureMoved, !waitForAllFingersToLift,
+                  let from = touchLandedPos[id], let to = touchLastPos[id] else { continue }
+            let dx = to.x - from.x, dy = to.y - from.y
+            if dx * dx + dy * dy <= 0.04 * 0.04 {
+                lastTapEndedAt = now
+                lastTapClicked = touchClicked.contains(id)
+            }
+        }
+        touchClicked = touchClicked.intersection(ids)
+        touchLandedPos = touchLandedPos.filter { ids.contains($0.key) }
+        touchLastPos = touchLastPos.filter { ids.contains($0.key) }
+        pressureHistory = pressureHistory.filter { ids.contains($0.key) }
+        touchLandedAt = touchLandedAt.filter { ids.contains($0.key) }
+        for finger in fingers {
+            if touchLandedAt[finger.id] == nil {
+                touchLandedAt[finger.id] = now
+                touchLandedPos[finger.id] = ClickPoint(x: finger.x, y: finger.y)
+            }
+            touchLastPos[finger.id] = ClickPoint(x: finger.x, y: finger.y)
+            var history = pressureHistory[finger.id] ?? []
+            history.append((now, max(0, finger.pressure)))
+            history.removeAll { now - $0.t > 0.12 }
+            pressureHistory[finger.id] = history
+        }
+    }
+
+    /// Whether `touch` is pressing right now (two-finger click
+    /// detection): at least half the threshold, and risen within the
+    /// last ~0.12 s by a quarter of the threshold — and by at least
+    /// 12 units, since contact readings are absolute: scroll and
+    /// resting fingers wobble by up to ~8 units whatever the preset,
+    /// which at the lightest presets is more than a quarter of the
+    /// threshold.
+    private func isCoPressing(_ touch: TouchSample) -> Bool {
+        let pressure = max(0, touch.pressure)
+        guard pressure >= threshold * 0.5, let history = pressureHistory[touch.id],
+              let lowest = history.map(\.p).min() else { return false }
+        return pressure - lowest >= max(threshold * 0.25, 12)
+    }
+
+    /// MULTI-FINGER TAP: whether `touch` is pressing as part of a
+    /// two- or three-finger tap — another finger touched down within
+    /// 0.1 s of it, and the press comes within 0.3 s of them landing.
+    /// That is macOS's secondary click, look-up and friends, never a
+    /// left click. A thumb that was already resting landed long
+    /// before the finger that presses; fingers set down together and
+    /// left to rest press later than any tap does.
+    private func isMultiFingerTap(_ touch: TouchSample) -> Bool {
+        guard let landed = touchLandedAt[touch.id] else { return false }
+        let now = nowProvider()
+        return currentFingers.contains { other in
+            guard other.id != touch.id, let otherLanded = touchLandedAt[other.id] else { return false }
+            return abs(otherLanded - landed) <= 0.1 && now - max(otherLanded, landed) <= 0.3
         }
     }
 
@@ -398,7 +634,20 @@ public final class ClickEngine {
             hardDwellFrames = 0
         }
 
-        if !buttonDown, pressure >= threshold, clickGateAllowsPress() {
+        if !buttonDown, !nativePressHeld, pressure >= threshold, clickGateAllowsPress() {
+            if !gestureMoved, activeTouchCount >= 2, isMultiFingerTap(touch) {
+                // MULTI-FINGER TAP (from on-device feedback): two or
+                // three fingers that touched down together and one
+                // of them reached the threshold — a two/three-finger
+                // tap or click. macOS never answers that with a left
+                // click (or a vibration); lock until every finger
+                // lifts. (A classified scroll is exempt: there the
+                // only way here is the deliberate hard-press
+                // override.)
+                resetSequence()
+                waitForAllFingersToLift = true
+                return
+            }
             fireButtonDown()
         }
 
@@ -471,11 +720,26 @@ public final class ClickEngine {
             eventNumber: activeEventNumber
         )
         buttonDown = true
+        if let fingerID {
+            touchClicked.insert(fingerID)
+        } else {
+            touchClicked.formUnion(currentFingers.map(\.id))
+        }
         tapFiredDownAt = fromTap ? nowProvider() : 0
         dragOrigin = location
         dragLatched = false
-        // Synthetic click haptic at the light threshold.
-        output?.pulseHaptic(down: true)
+        // SILENT CLICK (from on-device feedback): with another finger
+        // resting on the glass, macOS answers a light tap with a
+        // click but no vibration — so a light press made beside a
+        // resting finger clicks silently. Physical-strength clicks
+        // still pulse, as a real Mac's do: a jab that tripped macOS's
+        // own click (the native path) and the hard-press override
+        // mid-gesture. Alone on the glass, the synthetic click haptic
+        // plays at the light threshold.
+        silentPress = !fromTap && !gestureMoved && activeTouchCount >= 2
+        if !silentPress {
+            output?.pulseHaptic(down: true)
+        }
     }
 
     private func releaseButtonIfNeeded() {
@@ -485,8 +749,12 @@ public final class ClickEngine {
             clickState: max(clickCount, 1),
             eventNumber: activeEventNumber
         )
-        // Release-phase haptic, mirroring a real click's up-stroke.
-        output?.pulseHaptic(down: false)
+        // Release-phase haptic, mirroring a real click's up-stroke
+        // (none for a silent click).
+        if !silentPress {
+            output?.pulseHaptic(down: false)
+        }
+        silentPress = false
         buttonDown = false
         tapFiredDownAt = 0
         dragLatched = false

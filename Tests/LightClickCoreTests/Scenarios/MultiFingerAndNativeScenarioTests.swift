@@ -172,7 +172,7 @@ struct RestingThumbScenarioTests {
     func indexClicksWhileThumbRests(threshold: Double, rest: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(rest)
-        performer.still([thumb], frames: 5)
+        performer.still([thumb], seconds: 0.3)
         performer.press(Hand.light(threshold), with: [thumb])
         performer.still([thumb], seconds: 0.3)
         performer.lift()
@@ -190,7 +190,7 @@ struct RestingThumbScenarioTests {
     func indexDoubleClicksWhileThumbRests(threshold: Double, rest: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(rest)
-        performer.still([thumb], frames: 4)
+        performer.still([thumb], seconds: 0.3)
         performer.press(Hand.quick(threshold, finger: 1), with: [thumb])
         performer.still([thumb], seconds: 0.1)
         performer.press(Hand.quick(threshold, finger: 2), with: [thumb])
@@ -206,7 +206,7 @@ struct RestingThumbScenarioTests {
     func indexTripleClicksWhileThumbRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(14)
-        performer.still([thumb], frames: 4)
+        performer.still([thumb], seconds: 0.3)
         for finger: Int32 in 1 ... 3 {
             performer.press(Hand.quick(threshold, finger: finger), with: [thumb])
             performer.still([thumb], seconds: 0.08)
@@ -223,7 +223,7 @@ struct RestingThumbScenarioTests {
     func indexDragsWhileThumbRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(14)
-        performer.still([thumb], frames: 4)
+        performer.still([thumb], seconds: 0.3)
         performer.drag(Hand.light(threshold), dx: 0.2, frames: 20, dipTo: threshold * 0.45, with: [thumb])
         performer.still([thumb], frames: 5)
         performer.lift()
@@ -240,7 +240,7 @@ struct RestingThumbScenarioTests {
     func firmIndexClickWhileThumbRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(15)
-        performer.still([thumb], frames: 3)
+        performer.still([thumb], seconds: 0.3)
         performer.press(.firm(), with: [thumb])
         performer.still([thumb], frames: 10)
         performer.lift()
@@ -256,7 +256,7 @@ struct RestingThumbScenarioTests {
     func jabWhileThumbRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(15)
-        performer.still([thumb], frames: 3)
+        performer.still([thumb], seconds: 0.3)
         performer.press(.jab(), with: [thumb])
         performer.still([thumb], frames: 10)
         performer.lift()
@@ -271,7 +271,7 @@ struct RestingThumbScenarioTests {
     func thumbLandsAfterIndexThenIndexClicks(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let index = Contact(id: 1, x: 0.5, y: 0.5, pressure: 10)
-        performer.still([index], frames: 4)
+        performer.still([index], seconds: 0.3) // hovering a while before the thumb settles
         performer.still([index, Hand.thumb(6)], frames: 1)
         performer.still([index, Hand.thumb(14)], frames: 4)
         performer.press(Press(finger: 1, landing: 10, peak: threshold * 1.4), with: [Hand.thumb(14)])
@@ -335,23 +335,14 @@ struct RestingThumbScenarioTests {
     func indexPointsThenClicksWhileThumbRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(14)
-        performer.still([thumb], frames: 3)
+        performer.still([thumb], seconds: 0.3)
         performer.point(finger: 1, from: (0.45, 0.5), dx: 0.12, frames: 12, with: [thumb])
         performer.still([thumb, Contact(id: 1, x: 0.57, y: 0.5, pressure: 12)], frames: 4)
         performer.press(Press(finger: 1, x: 0.57, landing: 12, peak: threshold * 1.4), with: [thumb])
         performer.lift()
         #expect(performer.leakedNativePresses == 0)
-        withKnownIssue("BUG: a resting thumb + index pointing trips the scroll gate; light clicks die until the thumb lifts") {
-            #expect(performer.clicks.count == 1, "\(performer.report())")
-            // At 80 the press (112) also fires macOS's own click: its
-            // down is swallowed (gesture) but its up leaks unpaired.
-            if threshold * 1.4 >= performer.nativeThreshold {
-                #expect(performer.violations().isEmpty, "\(performer.report())")
-            }
-        }
-        if threshold * 1.4 < performer.nativeThreshold {
-            #expect(performer.violations().isEmpty, "\(performer.report())")
-        }
+        #expect(performer.clicks.count == 1, "\(performer.report())")
+        #expect(performer.violations().isEmpty, "\(performer.report())")
     }
 
     /// Thumb resting: drag something with the index, lift the index,
@@ -360,16 +351,14 @@ struct RestingThumbScenarioTests {
     func clickAfterDragWhileThumbStillRests(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let thumb = Hand.thumb(14)
-        performer.still([thumb], frames: 3)
+        performer.still([thumb], seconds: 0.3)
         performer.drag(Hand.light(threshold), dx: 0.15, frames: 15, dipTo: threshold * 0.6, with: [thumb])
         performer.still([thumb], seconds: 0.3)
         performer.press(Hand.light(threshold, finger: 2), with: [thumb])
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
         #expect(performer.clicks.first?.isDrag == true, "\(performer.report())")
-        withKnownIssue("BUG: the drag's travel leaves the scroll gate set while the thumb rests; the next light click is dropped") {
-            #expect(performer.clicks.count == 2, "\(performer.report())")
-        }
+        #expect(performer.clicks.count == 2, "\(performer.report())")
     }
 }
 
@@ -402,13 +391,10 @@ struct TwoFingerClickScenarioTests {
         #expect(performer.violations().isEmpty, "\(performer.report())")
         #expect(performer.clicks.isEmpty, "\(performer.report())")
         #expect(!performer.engine.isLocked)
-        // Fingers land light and ramp together, so tracking latches
-        // onto one finger before either reaches 50 %: the lock (only
-        // checked while nobody is tracked) never engages; tracking
-        // ping-pongs between the two pressers instead.
-        withKnownIssue("BUG: a real two-finger click (both land light, ramp together) never engages the two-finger lock") {
-            #expect(lockedDuring && lockedAfter)
-        }
+        // Fingers land light and ramp together, so one is already
+        // tracked before either reaches 50 %: the lock must still
+        // engage, from the two fingers pressing at the same moment.
+        #expect(lockedDuring && lockedAfter)
     }
 
     /// Real fingers land a frame or three apart, ramping together.
@@ -418,13 +404,7 @@ struct TwoFingerClickScenarioTests {
         performer.perform(.twoFingerClick(peak: threshold * 1.6, offsetFrames: offset))
         #expect(performer.violations().isEmpty, "\(performer.report())")
         let clicks = performer.clicks
-        if offset >= 3 {
-            withKnownIssue("BUG: a two-finger click whose 2nd finger lands 3 frames late fires a left click before locking") {
-                #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
-            }
-        } else {
-            #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
-        }
+        #expect(clicks.isEmpty, "\(describe(clicks))\n\(performer.report())")
     }
 
     /// One finger of the pair presses lighter than the other (the
@@ -441,16 +421,10 @@ struct TwoFingerClickScenarioTests {
         }
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
-        if peak * ratio < threshold {
-            // The lighter finger (≥ 50 % but < 100 % of the
-            // threshold) is never a "presser", so the tracked finger
-            // fires after the 3-frame dwell as if the other rested.
-            withKnownIssue("BUG: two-finger click with the 2nd finger at 50–99 % of threshold fires a left click") {
-                #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-            }
-        } else {
-            #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-        }
+        // Even when the lighter finger never reaches the threshold
+        // itself, it climbs with the other one: a two-finger click,
+        // not a press beside a resting finger.
+        #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
     }
 
     /// Context menu, then the user picks an item with an ordinary
@@ -487,9 +461,7 @@ struct TwoFingerClickScenarioTests {
         }
         performer.lift()
         #expect(performer.violations().isEmpty, "\(performer.report())")
-        withKnownIssue("BUG: the finger left behind after a two-finger click fires a left click (no lock was engaged)") {
-            #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
-        }
+        #expect(performer.clicks.isEmpty, "\(describe(performer.clicks))\n\(performer.report())")
     }
 
     /// A long secondary-click hold with pressure wobble on both
@@ -616,7 +588,7 @@ struct ChordAndHandOffScenarioTests {
     func restingFingerTrackedFirstThenAnotherPresses(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let middle = Contact(id: 3, x: 0.6, y: 0.55, pressure: 16)
-        performer.still([middle], frames: 5)
+        performer.still([middle], seconds: 0.3)
         performer.press(Hand.light(threshold), with: [middle])
         performer.still([middle], seconds: 0.2)
         performer.lift()
@@ -629,7 +601,7 @@ struct ChordAndHandOffScenarioTests {
     func twoRestingFingersThirdPresses(threshold: Double) {
         let performer = Performer(rig: TestRig(threshold: threshold))
         let rest = [Hand.thumb(14), Contact(id: 3, x: 0.62, y: 0.52, pressure: 11)]
-        performer.still(rest, frames: 5)
+        performer.still(rest, seconds: 0.3)
         performer.press(Hand.light(threshold), with: rest)
         performer.still(rest, frames: 5)
         performer.lift()
@@ -646,7 +618,7 @@ struct ChordAndHandOffScenarioTests {
             [Contact(id: 1, x: 0.4, y: 0.5, pressure: 12), Contact(id: 2, x: 0.5, y: 0.5, pressure: p),
              Contact(id: 3, x: 0.6, y: 0.5, pressure: 13)]
         }
-        performer.still(hand(12), frames: 4)
+        performer.still(hand(12), seconds: 0.4) // landed together, then rested
         for p in Press(finger: 2, landing: 12, peak: threshold * 1.4).curve {
             performer.frame(hand(p), pointer: nil)
         }
@@ -909,16 +881,12 @@ struct ExternalMouseScenarioTests {
         let r = performer.externalMouseClick(during: [], holdFrames: 10)
         performer.wait(1)
         let problems = mouseClickProblems(r, performer: performer, outputBefore: before)
-        if delay <= 0.15 {
-            withKnownIssue("BUG: mouse click < 0.15 s after a trackpad touch becomes our click and stays held (stuck button)") {
-                #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-                #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
-            }
-        } else {
-            #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-            #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
-            #expect(performer.clicks.count == 1)
-        }
+        // A mouse click < 0.15 s after a trackpad touch used to become
+        // our click and stay held (stuck button). With nothing on the
+        // glass, a native press passes through.
+        #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
+        #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
+        #expect(performer.clicks.count == 1)
     }
 
     /// The same after a mere touch (pointing with the finger, no
@@ -934,10 +902,10 @@ struct ExternalMouseScenarioTests {
         let r = performer.externalMouseClick(during: [], holdFrames: 10)
         let moveSwallowed = performer.rig.move(to: ClickPoint(x: 800, y: 300))
         let problems = mouseClickProblems(r, performer: performer, outputBefore: before)
-        withKnownIssue("BUG: mouse click < 0.15 s after a touch strands our synthetic button; later mouse moves become drags") {
-            #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-            #expect(!moveSwallowed, "a plain mouse move after the click was turned into a drag")
-        }
+        // Used to strand our synthetic button (later mouse moves
+        // became drags); fixed with the tap-to-click pass-through.
+        #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
+        #expect(!moveSwallowed, "a plain mouse move after the click was turned into a drag")
     }
 
     /// Typing posture: palms on the pad, the hand on the mouse
