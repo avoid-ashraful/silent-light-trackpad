@@ -23,7 +23,9 @@ let package = Package(
         .testTarget(
             name: "LightClickCoreTests",
             dependencies: ["LightClickCore"],
-            path: "Tests/LightClickCoreTests"
+            path: "Tests/LightClickCoreTests",
+            exclude: ["Scenarios/README.md"],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

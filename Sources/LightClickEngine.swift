@@ -192,7 +192,10 @@ final class LightClickEngine {
                 event.getDoubleValueField(.mouseEventDeltaY)
             )
             defer { systemOutput.pendingDragDelta = nil }
-            if core.handleNativeMouseMove(at: ClickPoint(x: Double(location.x), y: Double(location.y))) {
+            if core.handleNativeMouseMove(
+                at: ClickPoint(x: Double(location.x), y: Double(location.y)),
+                dragging: type == .leftMouseDragged
+            ) {
                 return nil
             }
         }

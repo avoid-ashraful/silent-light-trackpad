@@ -1012,8 +1012,10 @@ struct RobustLongSessionTests {
                 p.perform(.externalMouseClick)
             }
             let gesture = FuzzTests.randomGesture(&rng)
+            let leakedBefore = p.leakedNativePresses
             let produced = p.perform(gesture)
-            var problems = expectationProblems(gesture.expectation(threshold: threshold), produced: produced)
+            var problems = expectationProblems(gesture.expectation(threshold: threshold), produced: produced,
+                                               nativeClicks: p.leakedNativePresses - leakedBefore)
             if i % 100 == 99 { problems += p.violations() }
             if !problems.isEmpty {
                 failure = "seed \(seed) threshold \(threshold) gesture #\(i) \(gesture)\n" + p.report(problems, limit: 60)

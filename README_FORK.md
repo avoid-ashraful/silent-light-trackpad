@@ -142,6 +142,25 @@ light click is completely silent / feel-less.
      of the native movement it replaces, and down/dragged events
      report full button pressure (none on release), like a real
      button.
+   - Tap to click (from a device recording): the app writes Tap to
+     click off on start, but that preference only reaches the trackpad
+     driver at the next login, so taps kept making macOS post its own
+     clicks. The fast-jab path took every such click for a hard jab:
+     it swallowed it and posted a click of its own with a vibration;
+     when the click came after the finger had lifted it stayed held
+     until the next touch (a double tap held a selection, then
+     vibrated on the next touch), and macOS's tap-and-drag was cut
+     short. The engine now remembers the last tap (≤ 0.35 s, stayed
+     put, not part of a gesture) and lets a native press through
+     untouched when it is that tap's click: within 0.5 s of the tap,
+     with nothing on the glass, as a new finger lands, or with only
+     fingers that were already resting. A native press with nothing on
+     the glass always passes (it can't be a jab). If our own click
+     already answered the tap, macOS's duplicate is swallowed. While a
+     passed-through press is held, the pressure path posts no down of
+     its own. Fixture: `Tests/LightClickCoreTests/Fixtures/
+     tap-to-click-session.jsonl` (50 s of the recording; replays with
+     no output).
 3. `Sources/AppDelegate.swift` — the haptics menu item is no longer a
    disabled status label. Upstream it was created with `action: nil` and
    `isEnabled = false` ("Haptics: fully disabled"), so its state could

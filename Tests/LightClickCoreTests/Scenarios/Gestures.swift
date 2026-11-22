@@ -468,7 +468,13 @@ extension Performer {
 
 /// Problems with `produced` (the output of one gesture performed
 /// from rest) against `expectation`.
-func expectationProblems(_ expectation: Expectation, produced: [OutputEvent]) -> [String] {
+/// `nativeClicks`: native presses the engine let through to apps
+/// during the gesture. The engine lets macOS's own press through when
+/// it may be a tap-to-click for a light tap just before (see
+/// ClickEngine's TAP TO CLICK) — a hard jab landing within 0.5 s of
+/// a light tap is indistinguishable from that tap's pending click, so
+/// apps get macOS's click instead of ours. Still one click.
+func expectationProblems(_ expectation: Expectation, produced: [OutputEvent], nativeClicks: Int = 0) -> [String] {
     let clicks = clickRecords(produced)
     switch expectation {
     case .anything:
@@ -476,7 +482,9 @@ func expectationProblems(_ expectation: Expectation, produced: [OutputEvent]) ->
     case .noClicks:
         return clicks.isEmpty ? [] : ["expected no clicks, got \(clicks)"]
     case let .clicks(n):
-        if clicks.count != n { return ["expected \(n) click(s), got \(clicks.count): \(clicks)"] }
+        if clicks.count != n, clicks.count + nativeClicks != n {
+            return ["expected \(n) click(s), got \(clicks.count): \(clicks)"]
+        }
         let dragged = clicks.filter(\.isDrag)
         return dragged.isEmpty ? [] : ["expected stationary clicks, but some dragged: \(dragged)"]
     case .oneDrag:

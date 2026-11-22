@@ -121,9 +121,9 @@ final class TestRig {
     /// swallowed the native event and answered with its own
     /// dragged event.
     @discardableResult
-    func move(to point: ClickPoint) -> Bool {
+    func move(to point: ClickPoint, dragging: Bool = false) -> Bool {
         clock.cursor = point
-        return engine.handleNativeMouseMove(at: point)
+        return engine.handleNativeMouseMove(at: point, dragging: dragging)
     }
 
     var log: [String] { output.log }

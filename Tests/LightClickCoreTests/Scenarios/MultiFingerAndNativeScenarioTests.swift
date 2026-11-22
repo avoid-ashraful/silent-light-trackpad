@@ -881,16 +881,12 @@ struct ExternalMouseScenarioTests {
         let r = performer.externalMouseClick(during: [], holdFrames: 10)
         performer.wait(1)
         let problems = mouseClickProblems(r, performer: performer, outputBefore: before)
-        if delay <= 0.15 {
-            withKnownIssue("BUG: mouse click < 0.15 s after a trackpad touch becomes our click and stays held (stuck button)") {
-                #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-                #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
-            }
-        } else {
-            #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-            #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
-            #expect(performer.clicks.count == 1)
-        }
+        // A mouse click < 0.15 s after a trackpad touch used to become
+        // our click and stay held (stuck button). With nothing on the
+        // glass, a native press passes through.
+        #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
+        #expect(performer.violations(settled: true).isEmpty, "\(performer.report())")
+        #expect(performer.clicks.count == 1)
     }
 
     /// The same after a mere touch (pointing with the finger, no
@@ -906,10 +902,10 @@ struct ExternalMouseScenarioTests {
         let r = performer.externalMouseClick(during: [], holdFrames: 10)
         let moveSwallowed = performer.rig.move(to: ClickPoint(x: 800, y: 300))
         let problems = mouseClickProblems(r, performer: performer, outputBefore: before)
-        withKnownIssue("BUG: mouse click < 0.15 s after a touch strands our synthetic button; later mouse moves become drags") {
-            #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
-            #expect(!moveSwallowed, "a plain mouse move after the click was turned into a drag")
-        }
+        // Used to strand our synthetic button (later mouse moves
+        // became drags); fixed with the tap-to-click pass-through.
+        #expect(problems.isEmpty, "\(problems)\n\(performer.report())")
+        #expect(!moveSwallowed, "a plain mouse move after the click was turned into a drag")
     }
 
     /// Typing posture: palms on the pad, the hand on the mouse

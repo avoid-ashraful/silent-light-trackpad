@@ -95,10 +95,12 @@ struct FuzzTests {
                 done.append("pause(0.3) externalMouseClick")
             }
             let gesture = randomGesture(&rng)
+            let leakedBefore = performer.leakedNativePresses
             let produced = performer.perform(gesture)
             done.append(gesture.description)
             let problems = performer.violations()
-                + expectationProblems(gesture.expectation(threshold: threshold), produced: produced)
+                + expectationProblems(gesture.expectation(threshold: threshold), produced: produced,
+                                      nativeClicks: performer.leakedNativePresses - leakedBefore)
             if !problems.isEmpty {
                 return "seed \(seed) (threshold \(threshold), double-click interval \(interval)) failed after:\n  "
                     + done.joined(separator: "\n  ") + "\n" + performer.report(problems, limit: 60)
